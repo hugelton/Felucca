@@ -49,6 +49,7 @@
 #include "icons.c"           /* parameter icons (FELUCCA_ICONS), used by ui_draw.c */
 #include "ui_draw.c"
 #include "ui_menu.c"
+#include "ui_slice.c"         /* SLICE EDIT (FELUCCA_SLICE), used by ui_input.c */
 #include "ui_input.c"
 #ifndef FELUCCA_FLASH
 #define FELUCCA_FLASH 1          /* flash driver + storage.c */

@@ -3,6 +3,9 @@
 /* Felucca UI drawing: status bar (top), columns + gauges, graphs, focus readout,
  * footer (steps + engine / preset / page). */
 static void draw_menu(void);
+#if FELUCCA_SLICE
+static int slice_edit_draw(void);
+#endif
 static uint32_t str_hash(uint32_t h, const char *s);
 
 /* --------------------------------------------------------- drawing --- */
@@ -920,6 +923,12 @@ static void ui_draw(void)
         }
         return;
     }
+#if FELUCCA_SLICE
+    if (slice_edit_draw()) {
+        ui.force = 0;
+        return;
+    }
+#endif
     cursor_fix();
     if (ui.force)
         draw_frame();

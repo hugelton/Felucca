@@ -280,11 +280,18 @@ static void ui_input(void)
     uint32_t pressed = fm1_input_edges(0), notes = fm1_input_note_edges(), now = fm1_ticks(), id, b, k, fam = cur_fam();
     uint32_t home = btn_hold(&ui.home_t0, B_HOME, now, 1);
     uint32_t rec = btn_hold(&ui.rec_t0, B_REC, now, !ui.menu && (fam == FAM_SEQ || fam == FAM_ARP || fam == FAM_TRK));
+#if FELUCCA_SLICE
+    int slc_ctx = se.on || slice_edit_page();           /* EDIT acts on release here: a hold opens SLICE EDIT */
+    uint32_t edit = btn_hold(&ui.edit_t0, B_EDIT, now, slc_ctx && !se.on && !ui.menu);
+#endif
     int32_t s;
     if (home == BT_HOLD) {                              /* HOME held: open the menu, or leave it */
         if (ui.menu) {
             menu_close();
         } else {
+#if FELUCCA_SLICE
+            se.on = 0;
+#endif
             ui.menu = 1;
             ui.menu_sel = 0;
             ui.confirm = 0;                             /* (a clear dialog is cancelled) */
@@ -299,6 +306,24 @@ static void ui_input(void)
             menu_input(pressed);
         return;
     }
+#if FELUCCA_SLICE
+    if (se.on) {                                        /* SLICE EDIT: an EDIT or HOME tap closes it */
+        if (ui.rec_t0)
+            ui.rec_t0 |= 2u;
+        if (edit == BT_TAP || home == BT_TAP) {
+            slice_edit_close();
+            if (home == BT_TAP)
+                go_home();
+        } else {
+            slice_edit_input(pressed);
+        }
+        return;
+    }
+    if (slc_ctx && edit == BT_HOLD)
+        slice_edit_open();
+    else if (slc_ctx && edit == BT_TAP)
+        open_family(FAM_EDIT);                          /* what an EDIT press does elsewhere */
+#endif
     if (rec == BT_HOLD) {                               /* REC held on SEQ / ARP: "clear the sequence?", */
         ui.confirm = fam == FAM_TRK ? 2 : 1;            /* on TRACKS "clear track n?" (the selected one) */
         ui.confirm_trk = song.sel;
@@ -356,6 +381,11 @@ static void ui_input(void)
             break;
         }
         case B_EDIT:
+#if FELUCCA_SLICE
+            if (slc_ctx)
+                break;                                  /* SLICE's EDIT 1: tap / hold above */
+            ui.edit_t0 |= 2u;                           /* acted on press: its release is no tap */
+#endif
             if (song.seq_mode && cur_page()->scope == SC_STEP) {   /* STEP page: EDIT clears the step */
                 step_clear(&TSEL->step[ui.cursor]);
                 cursor_set(ui.cursor + 1);
