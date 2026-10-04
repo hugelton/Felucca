@@ -67,6 +67,9 @@ elif [ "${FELUCCA_SLICE:-0}" = 1 ]; then
     $CC -O2 -w -DFELUCCA_SLICE=1 -Ibuild/gen -Ifirmware/src -o "$OUT/slice_test" tests/slice_test.c -lm
     mkdir -p build/slice_demo
     run "SLICE: tables, AUTO onsets, REV, keys, ONE / GATE / LOOP, demos" "$OUT/slice_test" "$OUT/slice_loop" build/slice_demo
+    $CC -O2 -w -DFELUCCA_SLICE=1 -Ibuild/gen -Ifirmware/src -o "$OUT/slice_shot" tests/slice_shot.c -lm
+    mkdir -p build/slice_shot
+    run "SLICE EDIT screens (PPM, the firmware's drawing code)" "$OUT/slice_shot" "$OUT/slice_loop" build/slice_shot
 else
     echo "== skip SLICE (FELUCCA_SLICE=1 ./build.sh, then FELUCCA_SLICE=1 sh tests/run_tests.sh)"
 fi

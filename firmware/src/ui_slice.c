@@ -143,8 +143,11 @@ static void slice_edit_env(const slc_src_t *s)
 static void slice_edit_time(char *b, const slc_src_t *s, uint32_t n)
 {
     uint32_t hz = (s->rate >> 4) * 44100u >> 12;  /* as slc_scan */
-    fmt_fix(b, (int32_t)(n * 1000u / (hz ? hz : 1u)), 3);
+    b[0] = '0';                                     /* fmt_fix writes ".255": "0.255" */
+    fmt_fix(b + 1, (int32_t)(n * 1000u / (hz ? hz : 1u)), 3);
     str_cpy(b + str_len(b), " S", 4);
+    if (b[1] != '.')
+        str_cpy(b, b + 1, 16);
 }
 
 static int32_t slice_edit_x(uint32_t pos)
