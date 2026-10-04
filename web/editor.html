@@ -1613,7 +1613,7 @@ const TEXT = {
     samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。「録音」でコンピューターの入力から録音できます。波形の両端をドラッグすると切り取れます。",
     zones: "ゾーン", smpName: "名前", chooseFiles: "ファイルを選ぶ", upload: "書き込む", erase: "消去", clearList: "リストを消す",
     file: "ファイル", root: "ルート", keys: "鍵盤", length: "長さ", remove: "外す",
-    record: "録音", stopRec: "停止", recInput: "入力", recDenied: "録音できません", recFull: "スロットがいっぱいです",
+    record: "録音", stopRec: "停止", recInput: "入力", recDenied: "録音できません", recFull: "スロットがいっぱいです", recSilent: "無音でした。入力を確かめてください",
     preview: "試聴", autoTrim: "自動トリム", trim: "切り取り",
     smpTooBig: "大きすぎます", smpDecodeFail: "読み込めません: ", smpUploading: "書き込み中 USR", smpDone: "書き込みました USR",
     smpFail: "サンプルの書き込みに失敗しました: ", smpErased: "消去しました USR",
@@ -1675,7 +1675,7 @@ const TEXT = {
     samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine). Record takes a sample from the computer's input. Drag the ends of a waveform to trim it.",
     zones: "zones", smpName: "Name", chooseFiles: "Choose files", upload: "Upload", erase: "Erase", clearList: "Clear list",
     file: "File", root: "Root", keys: "Keys", length: "Length", remove: "Remove",
-    record: "Record", stopRec: "Stop", recInput: "Input", recDenied: "Cannot record", recFull: "The slot is full",
+    record: "Record", stopRec: "Stop", recInput: "Input", recDenied: "Cannot record", recFull: "The slot is full", recSilent: "Silence: check the input",
     preview: "Play", autoTrim: "Auto trim", trim: "Trim",
     smpTooBig: "too large", smpDecodeFail: "Cannot read: ", smpUploading: "Uploading USR", smpDone: "Uploaded USR",
     smpFail: "Sample upload failed: ", smpErased: "Erased USR",
@@ -2438,6 +2438,7 @@ async function recStart(k) {
       deviceId: recDevice ? { exact: recDevice } : undefined,
       echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
     const ctx = new AudioContext();
+    await ctx.resume();                             /* (made after the permission prompt: it may start suspended) */
     const url = URL.createObjectURL(new Blob([REC_WORKLET], { type: "text/javascript" }));
     await ctx.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
@@ -2458,7 +2459,7 @@ async function recStart(k) {
     requestAnimationFrame(recTick);
   } catch (e) {
     rec = null;
-    sayK("recDenied", e.message);
+    sayK("recDenied", ": " + e.message);
     renderSamples();
   }
 }
@@ -2489,6 +2490,13 @@ async function recStop() {
   }
   const raw = Float64Array.from(resample(x, r.ctx.sampleRate, SMP.RATE));
   const d = smpDraft[r.k];
+  let pk = 0;
+  for (const v of raw) pk = Math.max(pk, Math.abs(v));
+  if (pk < 1e-4) {                                  /* nothing came in: a muted or wrong input */
+    sayK("recSilent");
+    renderSamples();
+    return;
+  }
   if (raw.length > 1 && d.files.length < SMP.MAX_ZONES) {
     const [a, b] = autoTrim(raw);
     d.files.push({ fname: `REC ${d.files.length + 1}`, raw, a, b, s: takeSample(raw, a, b), root: 60 });
