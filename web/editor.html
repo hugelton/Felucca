@@ -757,6 +757,17 @@ function takeSample(raw, a, b) {
   return normalize(x);
 }
 
+/* a trimming view [v0, v1) of n samples: zoomed by factor (< 1 in) around the fraction at of the
+ * view, then moved by pan views; at least 256 samples (~12 ms), inside [0, n) */
+function zoomView(n, v0, v1, at, factor, pan) {
+  const min = Math.min(n, 256);
+  let span = Math.round(Math.max(min, Math.min(n, (v1 - v0) * factor)));
+  let c = v0 + at * (v1 - v0) + pan * span;         /* the sample under the pointer stays under it */
+  let a = Math.round(c - at * span);
+  a = Math.max(0, Math.min(n - span, a));
+  return [a, a + span];
+}
+
 /* where the sound is: the first and last sample above rel x the peak, with a 5 ms pre-roll and a
  * 20 ms tail; [0, length] for silence */
 function autoTrim(raw, rel = 0.02) {
@@ -1610,7 +1621,7 @@ const TEXT = {
     savedSlot: "保存しました: スロット ", loadedSlot: "読み込みました: スロット ", emptySlot: "空のスロットです: ",
     confirmSave: "スロット {n} に上書き保存しますか？", confirmLoad: "スロット {n} を読み込みますか？ 今の音色とパターンは置き換わります。",
     confirmClear: "シーケンスを全部消しますか？", confirmInit: "音色を初期化しますか？",
-    samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。「録音」でコンピューターの入力から録音できます。波形の両端をドラッグすると切り取れます。",
+    samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。「録音」でコンピューターの入力から録音できます。波形の両端をドラッグすると切り取れます（ホイールで拡大、Shift+ホイールで移動、ダブルクリックで全体）。",
     zones: "ゾーン", smpName: "名前", chooseFiles: "ファイルを選ぶ", upload: "書き込む", erase: "消去", clearList: "リストを消す",
     file: "ファイル", root: "ルート", keys: "鍵盤", length: "長さ", remove: "外す",
     record: "録音", stopRec: "停止", recInput: "入力", recDenied: "録音できません", recFull: "スロットがいっぱいです", recSilent: "無音でした。入力を確かめてください",
@@ -1672,7 +1683,7 @@ const TEXT = {
     savedSlot: "Saved to slot ", loadedSlot: "Loaded slot ", emptySlot: "Empty slot: ",
     confirmSave: "Overwrite slot {n}?", confirmLoad: "Load slot {n}? The current sound and pattern will be replaced.",
     confirmClear: "Clear the whole sequence?", confirmInit: "Reset the sound to the engine defaults?",
-    samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine). Record takes a sample from the computer's input. Drag the ends of a waveform to trim it.",
+    samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine). Record takes a sample from the computer's input. Drag the ends of a waveform to trim it (the wheel zooms, Shift + wheel scrolls, a double click shows it all).",
     zones: "zones", smpName: "Name", chooseFiles: "Choose files", upload: "Upload", erase: "Erase", clearList: "Clear list",
     file: "File", root: "Root", keys: "Keys", length: "Length", remove: "Remove",
     record: "Record", stopRec: "Stop", recInput: "Input", recDenied: "Cannot record", recFull: "The slot is full", recSilent: "Silence: check the input",
@@ -2505,33 +2516,52 @@ async function recStop() {
   renderSamples();
 }
 
-/* ---- trimming: the waveform of raw with its two ends, dragged with a pointer */
+/* ---- trimming: the waveform of raw with its two ends, dragged with a pointer; the wheel zooms
+ * (at the pointer), shift + wheel moves the view, a double click shows it all. The view, [v0, v1)
+ * of raw, is kept in the file (the list is drawn again after every trim). */
 function drawTrim(cv, f) {
-  const w = cv.width, h = cv.height, g = cv.getContext("2d"), cs = getComputedStyle(cv);
+  const w = cv.width, h = cv.height - 4, g = cv.getContext("2d"), cs = getComputedStyle(cv);
   const fg = cs.getPropertyValue("--fg").trim() || "#000", line = cs.getPropertyValue("--line").trim() || "#ccc";
-  const xa = f.a / f.raw.length * w, xb = f.b / f.raw.length * w;
+  const n = f.raw.length, v0 = f.v0 ?? 0, v1 = f.v1 ?? n, span = v1 - v0;
+  const xa = (f.a - v0) / span * w, xb = (f.b - v0) / span * w;
   let pk = 1e-9;
   for (const v of f.raw) pk = Math.max(pk, Math.abs(v));
-  g.clearRect(0, 0, w, h);
+  g.clearRect(0, 0, w, cv.height);
   for (let x = 0; x < w; x++) {                     /* per column: the smallest and largest sample */
-    const i0 = Math.floor(x / w * f.raw.length), i1 = Math.max(i0 + 1, Math.floor((x + 1) / w * f.raw.length));
+    const i0 = v0 + Math.floor(x / w * span), i1 = Math.max(i0 + 1, v0 + Math.floor((x + 1) / w * span));
     let lo = 0, hi = 0;
-    for (let i = i0; i < i1; i++) { lo = Math.min(lo, f.raw[i]); hi = Math.max(hi, f.raw[i]); }
+    for (let i = i0; i < i1 && i < n; i++) { lo = Math.min(lo, f.raw[i]); hi = Math.max(hi, f.raw[i]); }
     g.fillStyle = x >= xa && x < xb ? fg : line;
     g.fillRect(x, h / 2 - hi / pk * (h / 2 - 2), 1, Math.max(1, (hi - lo) / pk * (h / 2 - 2)));
   }
   g.fillStyle = fg;
-  g.fillRect(Math.min(w - 2, xa), 0, 2, h);
-  g.fillRect(Math.max(0, xb - 2), 0, 2, h);
+  if (xa >= 0 && xa <= w) g.fillRect(Math.min(w - 2, xa), 0, 2, h);
+  if (xb >= 0 && xb <= w) g.fillRect(Math.max(0, xb - 2), 0, 2, h);
+  g.fillStyle = line;                               /* where the view is in the whole */
+  g.fillRect(0, cv.height - 2, w, 2);
+  g.fillStyle = fg;
+  g.fillRect(v0 / n * w, cv.height - 3, Math.max(3, span / n * w), 3);
 }
 
 function trimCanvas(f) {
-  const cv = el("canvas", { class: "trim", width: 600, height: 56, title: t("trim") });
+  const cv = el("canvas", { class: "trim", width: 600, height: 60, title: t("trim") });
   let end = null;                                   /* "a" or "b": the end being dragged */
+  const frac = (e) => { const r = cv.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
   const at = (e) => {
-    const r = cv.getBoundingClientRect();
-    return Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * f.raw.length);
+    const v0 = f.v0 ?? 0, v1 = f.v1 ?? f.raw.length;
+    return Math.round(v0 + frac(e) * (v1 - v0));
   };
+  cv.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const v = [f.v0 ?? 0, f.v1 ?? f.raw.length];
+    const d = e.deltaY || e.deltaX;
+    if (!d) return;
+    [f.v0, f.v1] = e.shiftKey || (!e.deltaY && e.deltaX)
+      ? zoomView(f.raw.length, v[0], v[1], frac(e), 1, (d > 0 ? 0.1 : -0.1))
+      : zoomView(f.raw.length, v[0], v[1], frac(e), d > 0 ? 1.25 : 0.8, 0);
+    drawTrim(cv, f);
+  }, { passive: false });
+  cv.addEventListener("dblclick", () => { f.v0 = 0; f.v1 = f.raw.length; drawTrim(cv, f); });
   cv.addEventListener("pointerdown", (e) => {
     if (smpBusy) return;
     const p = at(e);

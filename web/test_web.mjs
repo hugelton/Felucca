@@ -28,7 +28,7 @@ const HERE = new URL(".", import.meta.url).pathname;
 const html = readFileSync(join(HERE, "editor.html"), "utf8");
 const proto = html.slice(html.indexOf("/*PROTO-BEGIN*/"), html.indexOf("/*PROTO-END*/"));
 const E = vm.runInNewContext(proto + `
-;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, rootFromName, buildSlot, makeMockDevice, CMD, SMP,
+;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, zoomView, rootFromName, buildSlot, makeMockDevice, CMD, SMP,
    UP, bank, capturePatch, auditionPatch, startWatch, libraryFile, readLibraryFile, paramKeys, patternFromSteps, stepsFromPattern, upName,
    mixer, GM_DRUM, drumName, parseNotes })`,
 { setTimeout, clearTimeout, setInterval, clearInterval, console });
@@ -519,6 +519,22 @@ function samplesMatch() {
   ok(cut.length === 2000 && cut[0] === 0 && Math.abs(cut[1999]) < 1000 && pk === 30000 &&
      Math.abs(cut[22]) < Math.abs(cut[22 + 63]) + 30000 * 0.6,
     "samples: a cut: its length, faded to 0 at both cut ends, peak normalised");
+
+  /* the trimming view: zoom at the pointer, at least 256 samples, inside the input; pan; out to all */
+  {
+    const n = 22050;
+    let v = E.zoomView(n, 0, n, 0.5, 0.5, 0);
+    const z1 = v[1] - v[0] === 11025 && v[0] === 5513;                     /* x2 around the middle */
+    v = E.zoomView(n, 0, n, 0.1, 0.25, 0);
+    const under = Math.abs((v[0] + 0.1 * (v[1] - v[0])) - 0.1 * n) <= 1;    /* the pointer's sample stays */
+    let w = [0, n];
+    for (let i = 0; i < 60; i++) w = E.zoomView(n, w[0], w[1], 0.97, 0.8, 0);
+    const minOk = w[1] - w[0] === 256 && w[1] <= n;
+    const p = E.zoomView(n, 1000, 3000, 0.5, 1, 0.1), edge = E.zoomView(n, 21000, 22000, 0.5, 1, 1);
+    const out = E.zoomView(n, 1000, 3000, 0.5, 100, 0);
+    ok(z1 && under && minOk && p[0] === 1200 && p[1] === 3200 && edge[1] === n && out.join() === `0,${n}`,
+      "samples: trim view: zoom at the pointer, 256 samples at least, inside the input, pan, out to all");
+  }
 }
 
 /* ------------------------------------------------------- packages: JS == Python --- */
