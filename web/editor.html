@@ -1763,6 +1763,7 @@ function showTab(name) {
   tab = name;
   try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* no storage */ }
   if (location.hash !== "#" + name) history.replaceState(null, "", location.pathname + location.search + "#" + name);
+  if (prev === "samples" && name !== "samples") samplesLeave();   /* no hidden recording or preview */
   renderPanels();
   if (name === "tracks" && prev !== "tracks" && hasTracks() && dev.dump) op(readMixer);
 }
@@ -1900,6 +1901,7 @@ async function connect() {
 }
 
 function disconnect(reasonKey = "disconnected") {
+  samplesLeave();                                   /* the Samples tab goes: so do the input and the preview */
   if (dev) {
     dev.link.close();
     dev.input.onmidimessage = null;
@@ -2440,36 +2442,42 @@ async function listInputs() {
   catch (e) { recInputs = []; }
 }
 
+let recStarting = false;                            /* (the permission prompt can take a while) */
 async function recStart(k) {
   const d = smpDraft[k], left = SMP.MAX_DATA - draftBytes(d);   /* bytes: two samples each */
-  if (rec || smpBusy) return;
+  if (rec || recStarting || smpBusy) return;
   if (left < 1024 || d.files.length >= SMP.MAX_ZONES) { sayK("recFull"); return; }
+  let stream = null, ctx = null;
+  recStarting = true;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: {
       deviceId: recDevice ? { exact: recDevice } : undefined,
       echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-    const ctx = new AudioContext();
+    ctx = new AudioContext();
     await ctx.resume();                             /* (made after the permission prompt: it may start suspended) */
     const url = URL.createObjectURL(new Blob([REC_WORKLET], { type: "text/javascript" }));
-    await ctx.audioWorklet.addModule(url);
-    URL.revokeObjectURL(url);
+    try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
     const node = new AudioWorkletNode(ctx, "felucca-rec"), mute = ctx.createGain();
     mute.gain.value = 0;                            /* pulled by the graph, but nothing is heard */
     ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
     rec = { k, ctx, stream, chunks: [], n: 0, max: Math.floor(left * 2 * ctx.sampleRate / SMP.RATE), peak: 0 };
     node.port.onmessage = (e) => {
       const r = rec;
-      if (!r || r.ctx !== ctx) return;
+      if (!r || r.ctx !== ctx || r.stopping) return;
       r.chunks.push(e.data);
       r.n += e.data.length;
       for (const v of e.data) r.peak = Math.max(r.peak, Math.abs(v));
       if (r.n >= r.max) recStop();
     };
+    recStarting = false;
     await listInputs();                             /* the labels come with the permission */
     renderSamples();
     requestAnimationFrame(recTick);
-  } catch (e) {
+  } catch (e) {                                     /* nothing stays open: the input, the context */
+    recStarting = false;
     rec = null;
+    if (stream) stream.getTracks().forEach((tr) => tr.stop());
+    if (ctx) ctx.close().catch(() => {});
     sayK("recDenied", ": " + e.message);
     renderSamples();
   }
@@ -2486,12 +2494,14 @@ function recTick() {
   requestAnimationFrame(recTick);
 }
 
+/* rec stays set (stopping) until the recording is in the draft: Upload and Record stay off meanwhile */
 async function recStop() {
   const r = rec;
-  if (!r) return;
-  rec = null;
+  if (!r || r.stopping) return;
+  r.stopping = true;
   r.stream.getTracks().forEach((tr) => tr.stop());
-  await r.ctx.close();
+  await r.ctx.close().catch(() => {});
+  rec = null;
   const x = new Float64Array(Math.min(r.n, r.max));
   let o = 0;
   for (const c of r.chunks) {
@@ -2623,6 +2633,16 @@ function trimCanvas(f) {
   return cv;
 }
 
+/* leaving the Samples tab or disconnecting: a recording is stopped (it stays in the draft), the
+ * preview stops and its audio context closes */
+function samplesLeave() {
+  if (rec) recStop();
+  if (previewSrc) try { previewSrc.stop(); } catch (e) { /* already ended */ }
+  previewSrc = null;
+  if (previewCtx) previewCtx.close().catch(() => {});
+  previewCtx = null;
+}
+
 /* play the trimmed sample as it will be stored (22050 Hz) */
 let previewSrc = null, previewCtx = null;
 function preview(f) {
@@ -2660,7 +2680,7 @@ function recRow(k) {
   sel.value = recDevice;
   sel.addEventListener("change", () => { recDevice = sel.value; });
   return el("div", { class: "head" },
-    el("button", { ic: on ? "control_stop_f" : "control_rec_f", disabled: smpBusy || (!!rec && !on),
+    el("button", { ic: on ? "control_stop_f" : "control_rec_f", disabled: smpBusy || recStarting || (!!rec && (!on || rec.stopping)),
       onclick: () => (on ? recStop() : recStart(k)) }, t(on ? "stopRec" : "record")),
     recInputs.length ? sel : "",
     on ? el("progress", { class: "rec", max: 1, value: 0 }) : "",
@@ -2691,7 +2711,7 @@ function renderSamples() {
       el("div", { class: "head" }, el("b", { text: `USR${k + 1}` }), el("span", { text: status }), bar,
         el("button", { ic: "symbol_trash", disabled: smpBusy || !u.zones, onclick: () => smpErase(k) }, t("erase"))),
       el("div", { class: "head" }, el("span", { text: t("smpName") }), name,
-        el("button", { ic: "symbol_folder_open", disabled: smpBusy, onclick: () => file.click() }, t("chooseFiles")), file,
+        el("button", { ic: "symbol_folder_open", disabled: smpBusy || !!rec, onclick: () => file.click() }, t("chooseFiles")), file,
         el("button", { ic: "symbol_upload", disabled: smpBusy || !!rec || !d.files.length || tooBig || !d.name, onclick: () => smpUpload(k, prog) }, t("upload")),
         d.files.length ? el("button", { text: t("clearList"), disabled: smpBusy || !!rec, onclick: () => { d.files = []; renderSamples(); } }) : "",
         size, prog),
@@ -2711,7 +2731,7 @@ function renderSamples() {
         tb.append(el("tr", {}, el("td", { text: f.fname }), el("td", {}, root),
           el("td", { text: `${noteName(keys[i][0])}–${noteName(keys[i][1])}` }),
           el("td", { text: `${(f.s.length / SMP.RATE).toFixed(2)} s` }),
-          el("td", {}, el("button", { text: t("remove"), disabled: smpBusy, onclick: () => { d.files.splice(i, 1); renderSamples(); } }))));
+          el("td", {}, el("button", { text: t("remove"), disabled: smpBusy || !!rec, onclick: () => { d.files.splice(i, 1); renderSamples(); } }))));
         if (f.raw)                                  /* the waveform: drag its ends to trim */
           tb.append(el("tr", { class: "trimrow" }, el("td", { colspan: 4 }, trimCanvas(f)),
             el("td", {},
@@ -2729,7 +2749,7 @@ function renderSamples() {
     blk.addEventListener("drop", (e) => {
       e.preventDefault();
       blk.classList.remove("over");
-      if (!smpBusy && e.dataTransfer.files.length) addFiles(k, [...e.dataTransfer.files]);
+      if (!smpBusy && !rec && e.dataTransfer.files.length) addFiles(k, [...e.dataTransfer.files]);   /* (the recording sized itself to the slot) */
     });
     return blk;
   }));
