@@ -60,6 +60,44 @@ whole-half diminished (DIMWH). Scales with other than seven notes continue acros
 the white keys without repeating notes; their roots need not fall on every C key.
 The drum track, GM sample kit and incoming MIDI retain their existing note mapping.
 
+## SLICE engine (optional)
+
+SLICE cuts a sample into slices and plays each slice from its own key. The release build does
+not include it. Build with `FELUCCA_SLICE=1` (see [BUILDING.md](BUILDING.md)): SLICE is then
+the tenth engine.
+
+The first EDIT page sets the slices. **SRC** is the material: BREAK (a built-in bar of drums)
+or a user sample slot, USR1 to USR3. An empty slot plays BREAK. **DIV** cuts it into 4, 8, 16
+or 32 equal slices, into one slice per hit (AUTO), or into slices set by hand (MAN). C4 (plus
+ROOT) plays slice 0; **START** shifts that. **PTCH** plays faster and higher, or slower and
+lower. The second page has **MODE** (ONE plays the whole slice, GATE stops at the note-off,
+LOOP repeats it while the key is held), **REV**, **DCAY** and **TONE**.
+
+### SLICE EDIT
+
+Hold **EDIT** on SLICE's first EDIT page to open SLICE EDIT. DIV changes to MAN. The first
+time, the slices are the AUTO ones. The screen shows the waveform, the slice starts and the
+selected slice.
+
+| Control | Action |
+| --- | --- |
+| KNOB 1 | select a slice |
+| KNOB 2 | move the slice's start |
+| KNOB 3 | move the slice's end: the next slice's start, or on the last slice the end of all slices |
+| KNOB 4 | zoom, x1 to x16 |
+| OCT+ | split the slice at its middle |
+| OCT- | delete the slice's start: the slice joins the one before |
+| EDIT or HOME | close |
+
+The view follows the start or the end, whichever knob you turned last. One detent moves a
+start or an end by one column of the view, so zoom in for small steps. The keys that play the
+selected slice light up, and PLAY runs the sequencer. A sample holds up to 32 slices, and each
+slice is at least 64 samples long.
+
+When SLICE EDIT closes, the slices are saved in flash ("SLICES SAVED"). They belong to the
+sample in the slot: a new upload into that slot drops them, and the same sample again brings
+them back.
+
 ## Layout
 
 | Path | What |

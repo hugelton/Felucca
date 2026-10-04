@@ -72,6 +72,9 @@ loader, a DSP render, the 4-track mix, project formats, the SLICER, the regressi
 the command-line installer) and, with Node.js, the web page tests. Run it after `./build.sh`
 (it uses `build/` and needs `AC79_SDK` set as for the build). The SLICE engine is not built by
 default; to test it, run both `./build.sh` and `tests/run_tests.sh` with `FELUCCA_SLICE=1`.
+The suite then also runs the SLICE tests (`tests/slice_test.c`: slices, MAN editing and its
+flash record) and draws the SLICE EDIT screens with the firmware's drawing code into
+`build/slice_shot/*.ppm` (`tests/slice_shot.c`).
 
 The regression suite (`tests/regress.c`) renders every engine and preset and compares a
 hash of each render with `tests/golden.txt`; it also checks levels, voices and the CPU
