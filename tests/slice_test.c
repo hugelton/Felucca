@@ -55,6 +55,25 @@ static uint32_t table_check(const slc_src_t *s)
     return bad + (SLC_GRID - k) + (s->nauto - a);
 }
 
+/* 6: MAN slices are sorted, start at 0, keep SLC_MIN apart, and each state == the decoder's there */
+static uint32_t man_check(const slc_src_t *s, const slc_man_t *m)
+{
+    slc_dec_t d;
+    uint32_t pos, a = 0, bad = 0;
+    if (!m->n || m->pos[0])
+        return 1;
+    for (a = 1; a < m->n; a++)
+        bad += m->pos[a] < m->pos[a - 1u] + SLC_MIN;
+    bad += s->len - m->pos[m->n - 1u] < SLC_MIN;
+    slc_dec_at(&d, 0, 0);
+    for (a = 0, pos = 0; pos < s->len && a < m->n; pos++) {
+        while (a < m->n && m->pos[a] == pos)
+            bad += m->st[a++] != slc_dec_st(&d);
+        slc_dec_next(s, &d);
+    }
+    return bad + (m->n - a);
+}
+
 /* 2: hits h[] (samples) against slice starts: each hit has a start in [h - early, h + late], each start
  * (but the first, at 0) is within that of a hit. Writes a list into msg. */
 static int match(const slc_src_t *s, const uint32_t *h, uint32_t nh, uint32_t early, uint32_t late, char *msg,
@@ -352,6 +371,71 @@ int main(int argc, char **argv)
                      m == SLC_GATE ? "stops at the note-off" : "loops while held, ends after the note-off");
             check(msg, held && (m == SLC_ONE ? after : !after) && !(v && v->active), 0);
         }
+    }
+
+    /* 6: MAN, the slices set by hand (SLICE EDIT) */
+    {
+        const slc_src_t *s = slc_get(1);
+        slc_man_t *m;
+        track_t *t = &trk[0];
+        voice_t *v;
+        uint32_t a, b, st, ok = 1, j, p0;
+        slc_bounds(s, SLC_DIV_MAN, 3, &a, &b, &st);
+        ok &= slc_count(s, SLC_DIV_MAN) == s->nauto && a == s->apos[3] && b == s->apos[4] && st == s->ast[3];
+        check("MAN: none set = the AUTO slices", ok, 0);
+
+        ok = 1;
+        m = slc_man_begin(1);
+        ok &= m->n == s->nauto && !man_check(s, m);
+        p0 = m->pos[3];
+        ok &= slc_man_move(s, m, 3, 1000) == p0 + 1000u;
+        ok &= slc_man_move(s, m, 3, -1000) == p0;
+        ok &= slc_man_move(s, m, 3, -1000000) == m->pos[2] + SLC_MIN;
+        ok &= slc_man_move(s, m, 3, 1000000) == m->pos[4] - SLC_MIN;
+        ok &= slc_man_move(s, m, m->n - 1u, 1000000) == s->len - SLC_MIN;
+        ok &= slc_man_move(s, m, 0, 500) == 0u && m->pos[0] == 0u;
+        slc_bounds(s, SLC_DIV_MAN, 3, &a, &b, &st);
+        ok &= slc_count(s, SLC_DIV_MAN) == s->nauto && a == s->apos[3];
+        check("MAN: move keeps the order, SLC_MIN, slice 0 at 0; unused until commit", ok && !man_check(s, m), 0);
+
+        ok = 1;
+        j = m->n;
+        ok &= slc_man_split(s, m, 0) == 1u && m->n == j + 1u && m->pos[1] == m->pos[2] / 2u;
+        ok &= slc_man_delete(m, 1) == 0u && m->n == j;
+        ok &= slc_man_delete(m, 0) == 0u && m->n == j;
+        for (i = 0; m->n < SLC_AUTO && i < 1000u; i++)
+            slc_man_split(s, m, i % m->n);
+        ok &= m->n == SLC_AUTO && slc_man_split(s, m, 0) == 0u && m->n == SLC_AUTO;
+        check("MAN: split at the middle, delete joins, at most 32", ok && !man_check(s, m), "%u slices", m->n);
+
+        ok = 1;
+        slc_man_commit(1);
+        ok &= slc_count(s, SLC_DIV_MAN) == SLC_AUTO;
+        slc_bounds(s, SLC_DIV_MAN, 5, &a, &b, &st);
+        ok &= a == m->pos[5] && b == m->pos[6] && st == m->st[5];
+        ok &= slc_count(s, SLC_DIV_AUTO) == s->nauto;           /* AUTO keeps its own */
+        host_tracks_init();
+        host_preset(t, SLC_ENG, 0);
+        t->p[P_E0] = 1;
+        t->p[P_E1] = SLC_DIV_MAN;
+        trk_note_on(t, 65, 100);
+        ok &= (v = voice_of(t, 65)) && slice_of(v) == 5u && v->ph[0] == m->pos[5] && v->ph[2] == m->pos[6];
+        trk_note_on(t, 60 + 33, 100);                          /* 33 mod 32 */
+        ok &= (v = voice_of(t, 93)) && slice_of(v) == 1u;
+        for (bad = 0, i = 0; i < SLC_AUTO; i++)
+            bad += rev_check(1, SLC_DIV_MAN, i);
+        check("MAN: in use after commit: keys, bounds, REV", ok && !bad, "%u samples differ", bad);
+
+        ok = 1;
+        m = slc_man_begin(1);                                  /* the copy of the table in use */
+        ok &= m->n == SLC_AUTO && slc_man_delete(m, 31) == 30u;
+        slc_man_commit(1);
+        ok &= slc_count(s, SLC_DIV_MAN) == SLC_AUTO - 1u && !man_check(s, slc_man_of(s));
+        smp_user_scan(0);                                      /* the slot is read again: MAN is gone */
+        ok &= slc_count(slc_get(1), SLC_DIV_MAN) == slc_get(1)->nauto && !slc_man_of(slc_get(1));
+        m = slc_man_begin(2);                                  /* USR2 is empty: nothing to edit */
+        ok &= m->n == 0u && slc_man_split(slc_get(0), m, 0) == 0u && m->n == 0u;
+        check("MAN: edits stack, a slot scan clears them, an empty slot has none", ok, 0);
     }
 
     /* 5 */

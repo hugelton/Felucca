@@ -57,11 +57,23 @@ static const slc_src_t SLC_BREAK = SLC_BREAK_INIT;
 static slc_src_t slc_usr[SMP_USER_SLOTS];
 static int16_t slc_rbuf[NPART][NVOICE][SLC_RB];       /* reverse windows, one per part voice */
 static const char *const N_SLC_SRC[] = {"BREAK", "USR1", "USR2", "USR3"};
-static const char *const N_SLC_DIV[] = {"4", "8", "16", "32", "AUTO"};
+static const char *const N_SLC_DIV[] = {"4", "8", "16", "32", "AUTO", "MAN"};
 static const char *const N_SLC_MODE[] = {"ONE", "GATE", "LOOP"};
 static const char *const N_SLC_REV[] = {"OFF", "ON"};
 enum { SLC_ONE, SLC_GATE, SLC_LOOP };
 #define SLC_DIV_AUTO 4u
+#define SLC_DIV_MAN 5u               /* the slice starts set by hand (SLICE EDIT); none yet: the AUTO ones */
+#define SLC_MIN 64u                  /* MAN: the shortest slice (samples) */
+
+/* MAN slices per source (0 BREAK, 1..3 USR1..3), in RAM. Two copies: the audio side reads
+ * slc_man[src][slc_man_cur[src]]; the editor (main loop) changes the other one and then flips
+ * slc_man_cur (one byte), so a note-on never sees a half-edited table. n = 0: none. */
+typedef struct {
+    uint32_t n;                      /* slices (pos[0] = 0), 0 = none */
+    uint32_t pos[SLC_AUTO], st[SLC_AUTO];     /* slice starts and their decoder states (as ast) */
+} slc_man_t;
+static slc_man_t slc_man[1 + SMP_USER_SLOTS][2];
+static volatile uint8_t slc_man_cur[1 + SMP_USER_SLOTS];
 
 /* source 0 = BREAK, 1..3 = USR1..3; 0 = no material (an empty or erased slot) */
 static const slc_src_t *slc_get(uint32_t src)
@@ -118,16 +130,34 @@ static inline int32_t slc_dec_next(const slc_src_t *s, slc_dec_t *d)
 }
 
 static inline uint32_t slc_gpos(const slc_src_t *s, uint32_t k) { return (k * s->len) >> SLC_GRID_LOG2; }
-static uint32_t slc_count(const slc_src_t *s, uint32_t div) { return div < SLC_DIV_AUTO ? 4u << div : s->nauto; }
+/* the source number of s (0 BREAK, 1..3 USR1..3) and its MAN slices in use, 0 = none */
+static uint32_t slc_src_of(const slc_src_t *s) { return s == &SLC_BREAK ? 0u : (uint32_t)(s - slc_usr) + 1u; }
+static const slc_man_t *slc_man_of(const slc_src_t *s)
+{
+    uint32_t src = slc_src_of(s);
+    const slc_man_t *m = &slc_man[src][slc_man_cur[src] & 1u];
+    return m->n ? m : 0;
+}
+static uint32_t slc_count(const slc_src_t *s, uint32_t div)
+{
+    const slc_man_t *m = div == SLC_DIV_MAN ? slc_man_of(s) : 0;
+    return div < SLC_DIV_AUTO ? 4u << div : m ? m->n : s->nauto;
+}
 
 /* slice j of DIV div: [*a, *b), *st the state at *a */
 static void slc_bounds(const slc_src_t *s, uint32_t div, uint32_t j, uint32_t *a, uint32_t *b, uint32_t *st)
 {
+    const slc_man_t *m = div == SLC_DIV_MAN ? slc_man_of(s) : 0;
     if (div < SLC_DIV_AUTO) {
         uint32_t w = SLC_GRID >> (2u + div);
         *a = slc_gpos(s, j * w);
         *b = slc_gpos(s, (j + 1u) * w);
         *st = s->grid[j * w];
+    } else if (m) {
+        j = j < m->n ? j : m->n - 1u;
+        *a = m->pos[j];
+        *b = j + 1u < m->n ? m->pos[j + 1u] : s->len;
+        *st = m->st[j];
     } else {
         j = j < s->nauto ? j : s->nauto - 1u;
         *a = s->apos[j];
@@ -201,6 +231,7 @@ static void slc_user_scan(uint32_t k, int valid)
     uint32_t i, j, at = 0;
     s->len = 0;
     RING_PUBLISH();
+    slc_man[k + 1u][0].n = slc_man[k + 1u][1].n = 0;   /* new material: its MAN slices are gone */
     if (!valid)
         return;
     s->nseg = 0;
@@ -223,6 +254,98 @@ static void slc_user_scan(uint32_t k, int valid)
     s->len = at;
 }
 
+/* ---- MAN: editing (main loop, SLICE EDIT). Begin with slc_man_begin, change the copy it returns
+ * with move / split / delete, then slc_man_commit puts it in use. */
+/* the decoder state before sample pos: decoded from the grid point at or below it */
+static uint32_t slc_state_at(const slc_src_t *s, uint32_t pos)
+{
+    slc_dec_t d;
+    uint32_t k = (pos << SLC_GRID_LOG2) / s->len;
+    while (k && slc_gpos(s, k) > pos)
+        k--;
+    while (k + 1u < SLC_GRID && slc_gpos(s, k + 1u) <= pos)
+        k++;
+    slc_dec_at(&d, slc_gpos(s, k), s->grid[k]);
+    while (d.pos < pos)
+        slc_dec_next(s, &d);
+    return slc_dec_st(&d);
+}
+
+/* the copy to edit for source src: the MAN slices in use, or the AUTO ones when there are none */
+static slc_man_t *slc_man_begin(uint32_t src)
+{
+    const slc_src_t *s = slc_get(src);
+    const slc_man_t *cur = &slc_man[src][slc_man_cur[src] & 1u];
+    slc_man_t *m = &slc_man[src][(slc_man_cur[src] & 1u) ^ 1u];
+    uint32_t i;
+    if (cur->n) {
+        *m = *cur;
+    } else {
+        m->n = s ? s->nauto : 0u;
+        for (i = 0; i < m->n; i++) {
+            m->pos[i] = s->apos[i];
+            m->st[i] = s->ast[i];
+        }
+    }
+    return m;
+}
+static void slc_man_commit(uint32_t src)
+{
+    RING_PUBLISH();
+    slc_man_cur[src] ^= 1u;
+}
+
+/* move the start of slice j (1 .. n - 1; slice 0 starts at 0) by d samples; keeps SLC_MIN to both
+ * neighbours. Returns the new start. */
+static uint32_t slc_man_move(const slc_src_t *s, slc_man_t *m, uint32_t j, int32_t d)
+{
+    int32_t lo, hi, p;
+    if (!j || j >= m->n)
+        return j < m->n ? m->pos[j] : 0u;
+    lo = (int32_t)(m->pos[j - 1u] + SLC_MIN);
+    hi = (int32_t)((j + 1u < m->n ? m->pos[j + 1u] : s->len) - SLC_MIN);
+    p = clamp((int32_t)m->pos[j] + d, lo, hi);
+    if (p != (int32_t)m->pos[j]) {
+        m->pos[j] = (uint32_t)p;
+        m->st[j] = slc_state_at(s, (uint32_t)p);
+    }
+    return m->pos[j];
+}
+
+/* split slice j in two at its middle; returns the new slice (j + 1), or j if it cannot */
+static uint32_t slc_man_split(const slc_src_t *s, slc_man_t *m, uint32_t j)
+{
+    uint32_t a, b, i;
+    if (j >= m->n || m->n >= SLC_AUTO)
+        return j;
+    a = m->pos[j];
+    b = j + 1u < m->n ? m->pos[j + 1u] : s->len;
+    if (b - a < 2u * SLC_MIN)
+        return j;
+    for (i = m->n; i > j + 1u; i--) {
+        m->pos[i] = m->pos[i - 1u];
+        m->st[i] = m->st[i - 1u];
+    }
+    m->pos[j + 1u] = a + (b - a) / 2u;
+    m->st[j + 1u] = slc_state_at(s, m->pos[j + 1u]);
+    m->n++;
+    return j + 1u;
+}
+
+/* delete the start of slice j (1 .. n - 1): it joins slice j - 1; returns that one */
+static uint32_t slc_man_delete(slc_man_t *m, uint32_t j)
+{
+    uint32_t i;
+    if (!j || j >= m->n)
+        return j < m->n ? j : 0u;
+    for (i = j; i + 1u < m->n; i++) {
+        m->pos[i] = m->pos[i + 1u];
+        m->st[i] = m->st[i + 1u];
+    }
+    m->n--;
+    return j - 1u;
+}
+
 /* ---- voices */
 static int16_t *slc_rb(track_t *t, voice_t *v)
 {
@@ -233,7 +356,7 @@ static int16_t *slc_rb(track_t *t, voice_t *v)
 static void slice_note_on(track_t *t, voice_t *v)
 {
     const int16_t *p = t->p;
-    uint32_t src = (uint32_t)p[P_E0] & 3u, div = (uint32_t)clamp(p[P_E1], 0, SLC_DIV_AUTO), rev = p[P_E5] != 0;
+    uint32_t src = (uint32_t)p[P_E0] & 3u, div = (uint32_t)clamp(p[P_E1], 0, SLC_DIV_MAN), rev = p[P_E5] != 0;
     uint32_t a, b, st, n;
     int32_t j;
     const slc_src_t *s = slc_get(src);
@@ -404,7 +527,7 @@ static const engine_t ENG_SLICE = {
     "SLICE", {"SLCE", "PLAY"},
     {
         {"SRC", F_ENUM, 0, 3, 0, N_SLC_SRC, 0},
-        {"DIV", F_ENUM, 0, 4, 2, N_SLC_DIV, 0},
+        {"DIV", F_ENUM, 0, 5, 2, N_SLC_DIV, 0},
         {"START", F_INT, 0, 31, 0, 0, 0},
         {"PTCH", F_SEMI, -24, 24, 0, 0, 0},
         {"MODE", F_ENUM, 0, 2, 0, N_SLC_MODE, 0},
