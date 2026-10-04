@@ -55,16 +55,16 @@ static uint32_t table_check(const slc_src_t *s)
     return bad + (SLC_GRID - k) + (s->nauto - a);
 }
 
-/* 6: MAN slices are sorted, start at 0, keep SLC_MIN apart, and each state == the decoder's there */
+/* 6: MAN slices are sorted, keep SLC_MIN apart (and from their end), and each state == the decoder's there */
 static uint32_t man_check(const slc_src_t *s, const slc_man_t *m)
 {
     slc_dec_t d;
     uint32_t pos, a = 0, bad = 0;
-    if (!m->n || m->pos[0])
+    if (!m->n || slc_man_end(s, m) > s->len)
         return 1;
     for (a = 1; a < m->n; a++)
         bad += m->pos[a] < m->pos[a - 1u] + SLC_MIN;
-    bad += s->len - m->pos[m->n - 1u] < SLC_MIN;
+    bad += slc_man_end(s, m) < m->pos[m->n - 1u] + SLC_MIN;
     slc_dec_at(&d, 0, 0);
     for (a = 0, pos = 0; pos < s->len && a < m->n; pos++) {
         while (a < m->n && m->pos[a] == pos)
@@ -393,10 +393,19 @@ int main(int argc, char **argv)
         ok &= slc_man_move(s, m, 3, -1000000) == m->pos[2] + SLC_MIN;
         ok &= slc_man_move(s, m, 3, 1000000) == m->pos[4] - SLC_MIN;
         ok &= slc_man_move(s, m, m->n - 1u, 1000000) == s->len - SLC_MIN;
-        ok &= slc_man_move(s, m, 0, 500) == 0u && m->pos[0] == 0u;
+        slc_man_move(s, m, 3, -1000000);                                     /* (room again) */
+        slc_man_move(s, m, m->n - 1u, -1000000);
+        ok &= slc_man_move(s, m, 0, 500) == 500u && slc_man_move(s, m, 0, -1000) == 0u;   /* slice 0: head trim */
+        p0 = m->pos[4];
+        ok &= slc_man_move_end(s, m, 3, -200) == p0 - 200u && m->pos[4] == p0 - 200u;      /* = the next start */
+        ok &= slc_man_move_end(s, m, 3, 200) == p0;
+        ok &= slc_man_move_end(s, m, m->n - 1u, -3000) == s->len - 3000u && slc_man_end(s, m) == s->len - 3000u;
+        ok &= slc_man_move(s, m, m->n - 1u, 1000000) == s->len - 3000u - SLC_MIN;        /* within the end */
+        ok &= slc_man_move_end(s, m, m->n - 1u, -1000000) == m->pos[m->n - 1u] + SLC_MIN;
+        ok &= slc_man_move_end(s, m, m->n - 1u, 1000000) == s->len;
         slc_bounds(s, SLC_DIV_MAN, 3, &a, &b, &st);
         ok &= slc_count(s, SLC_DIV_MAN) == s->nauto && a == s->apos[3];
-        check("MAN: move keeps the order, SLC_MIN, slice 0 at 0; unused until commit", ok && !man_check(s, m), 0);
+        check("MAN: move start / end, SLC_MIN, head and tail trim; unused until commit", ok && !man_check(s, m), 0);
 
         ok = 1;
         j = m->n;

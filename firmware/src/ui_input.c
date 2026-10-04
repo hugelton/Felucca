@@ -47,6 +47,11 @@ static void ui_leds(void)
     led_put(nl, panel.btn[B_OCTUP], song.octave > 0);
     for (k = 0; k < 27u; k++)
         led_put(nl, 14u + k, (int)((fm1_in.notes >> k) & 1u));
+#if FELUCCA_SLICE
+    c = slice_edit_keys();                              /* SLICE EDIT: the keys of the selected slice */
+    for (k = 0; k < 27u; k++)
+        led_put(nl, 14u + k, (int)((c >> k) & 1u));
+#endif
     for (c = 0; c < FM1_NCOL; c++)
         fm1_led[c] = nl[c];
 }

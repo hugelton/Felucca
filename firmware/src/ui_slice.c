@@ -2,15 +2,16 @@
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
 /* SLICE EDIT (FELUCCA_SLICE): the MAN slices of the selected part's source, set by hand
  * (eng_slice.c slc_man_*). Hold EDIT on SLICE's first EDIT page to open it (DIV becomes MAN);
- * EDIT or HOME closes it. KNOB 1 selects a slice, KNOB 2 moves its start by a column of the view,
- * KNOB 3 by 8 samples, KNOB 4 zooms (x1..x16, around the selected start). OCT+ splits the slice
- * at its middle, OCT- deletes its start (it joins the slice before). The keys play the slices as
- * always, PLAY runs the sequencer. The waveform: the smallest and largest sample per column,
- * decoded here in the main loop when the view moves. */
+ * EDIT or HOME closes it. KNOB 1 selects a slice, KNOB 2 moves its start, KNOB 3 its end (the next
+ * slice's start; the last slice: where all slices end), a column of the view per detent (finer
+ * when zoomed); KNOB 4 zooms (x1..x16, around the selected start). OCT+ splits the slice at its
+ * middle, OCT- deletes its start (it joins the slice before). The keys play the slices as always
+ * (those that play the selected one are lit), PLAY runs the sequencer. The waveform: the smallest
+ * and largest sample per column, decoded here in the main loop when the view moves. */
 #if FELUCCA_SLICE
 #define SE_W 240u
 #define SE_MID 52                    /* band 1: the waveform's centre row, +-48 */
-#define SE_FINE 8                    /* KNOB 3: samples per detent */
+static int32_t accel(uint32_t role, int32_t s, int32_t range);   /* ui_input.c */
 static struct {
     uint8_t on, src, sel, zoom;      /* zoom: log2 of x1..x16 */
     uint32_t view, span;             /* the view: first sample, samples */
@@ -70,7 +71,7 @@ static void slice_edit_input(uint32_t pressed)
     const slc_src_t *s = slc_get(se.src);
     const slc_man_t *cur = s ? slc_man_of(s) : 0;
     slc_man_t *m;
-    int32_t d;
+    int32_t d, col;
     if (!cur || ENGINES[TSEL->engine] != &ENG_SLICE || song.sel >= NPART) {
         slice_edit_close();                         /* the slot changed (an upload) or the sound did */
         return;
@@ -82,11 +83,14 @@ static void slice_edit_input(uint32_t pressed)
     if ((d = panel_enc(EN_K4)) != 0)
         se.zoom = (uint8_t)clamp((int32_t)se.zoom + d, 0, 4);
     slice_edit_view(s, cur);
-    d = panel_enc(EN_K2) * (int32_t)(se.span / SE_W ? se.span / SE_W : 1u);
-    d += panel_enc(EN_K3) * SE_FINE;
-    if (d && se.sel) {
+    col = (int32_t)(se.span / SE_W ? se.span / SE_W : 1u);
+    if ((d = panel_enc(EN_K2)) != 0) {                  /* the start, a column of the view per detent */
         m = slc_man_begin(se.src);
-        slc_man_move(s, m, se.sel, d);
+        slc_man_move(s, m, se.sel, accel(EN_K2, d, 1000) * col);
+        slc_man_commit(se.src);
+    } else if ((d = panel_enc(EN_K3)) != 0) {           /* the end (the next slice's start) */
+        m = slc_man_begin(se.src);
+        slc_man_move_end(s, m, se.sel, accel(EN_K3, d, 1000) * col);
         slc_man_commit(se.src);
     } else if ((pressed >> panel.btn[B_OCTUP]) & 1u) {
         m = slc_man_begin(se.src);
@@ -138,6 +142,18 @@ static int32_t slice_edit_x(uint32_t pos)
     return pos < se.view ? -1 : (int32_t)((pos - se.view) * SE_W / se.span);
 }
 
+/* the legend: a control in full colour, what it does in grey; pairs, 0-terminated */
+static const char *const LEGEND_KNOBS[] = {"K1", "SEL", "K2", "START", "K3", "END", "K4", "ZOOM", 0};
+static const char *const LEGEND_KEYS[] = {"OCT+", "SPLIT", "OCT-", "DEL", "EDIT", "EXIT", 0};
+static void slice_edit_legend(int32_t y, const char *const *t)
+{
+    int32_t x = 4;
+    for (; *t; t += 2) {                            /* 4 px inside a pair, 8 between: fits 232 px */
+        x = cv_text(x, y, &FONT_S, t[0], C_HI) + 4;
+        x = cv_text(x, y, &FONT_S, t[1], C_GRAY) + 8;
+    }
+}
+
 static void draw_slice_edit(void)
 {
     const slc_src_t *s = slc_get(se.src);
@@ -147,7 +163,7 @@ static void draw_slice_edit(void)
     if (!m)
         return;
     slice_edit_view(s, m);
-    sig = se.src * 7u + se.sel * 131u + se.zoom * 1009u + m->n * 7919u + se.view;
+    sig = se.src * 7u + se.sel * 131u + se.zoom * 1009u + m->n * 7919u + se.view + m->end * 104729u;
     for (i = 0; i < m->n; i++)
         sig = sig * 31u + m->pos[i];
     if (!ui.force && sig == se.sig)
@@ -155,7 +171,7 @@ static void draw_slice_edit(void)
     se.sig = sig;
     slice_edit_env(s);
     a = m->pos[se.sel];
-    b = se.sel + 1u < m->n ? m->pos[se.sel + 1u] : s->len;
+    b = se.sel + 1u < m->n ? m->pos[se.sel + 1u] : slc_man_end(s, m);
     if (ui.force)                                   /* head + rule + two bands cover rows 0..229 */
         lcd_fill(0, H_HEAD + 1 + 124 + 85, 240, 240 - (H_HEAD + 1 + 124 + 85), C_BLACK);
     cv_begin(240, H_HEAD, C_BLACK);
@@ -167,12 +183,17 @@ static void draw_slice_edit(void)
         cv_begin(240, pass ? 85u : 124u, C_BLACK);
         cv_oy = pass ? -124 : 0;
         {   /* the selected slice, the waveform, the starts, where the view is in the whole */
+            uint32_t end = slc_man_end(s, m);
             int32_t xa = slice_edit_x(a), xb = b > se.view + se.span ? (int32_t)SE_W : slice_edit_x(b);
+            int32_t xs = slice_edit_x(m->pos[0]), xe = end >= se.view + se.span ? (int32_t)SE_W : slice_edit_x(end);
             xa = xa < 0 ? 0 : xa;
             if (xb > xa)
                 cv_rect(xa, SE_MID - 48, xb - xa, 97, C_LINE);
-            for (i = 0; i < SE_W; i++)
-                cv_line((int32_t)i, SE_MID - se.hi[i] * 3 / 4, (int32_t)i, SE_MID - se.lo[i] * 3 / 4, C_HI);
+            for (i = 0; i < SE_W; i++)                  /* outside the first start .. the end: dim */
+                cv_line((int32_t)i, SE_MID - se.hi[i] * 3 / 4, (int32_t)i, SE_MID - se.lo[i] * 3 / 4,
+                        (int32_t)i >= xs && (int32_t)i < xe ? C_HI : C_DIM);
+            if (xe >= 0 && xe < (int32_t)SE_W)
+                cv_line(xe, SE_MID - 50, xe, SE_MID + 50, C_GRAY);
             for (i = 0; i < m->n; i++) {
                 int32_t x = slice_edit_x(m->pos[i]);
                 if (x >= 0 && x < (int32_t)SE_W)
@@ -202,12 +223,26 @@ static void draw_slice_edit(void)
             slice_edit_time(u, s, b - a);
             str_cpy(t + 4, u, sizeof t - 4);
             cv_text(124, y + 18, &FONT_S, t, C_HI);
-            cv_text(4, y + 40, &FONT_S, "K1 SEL K2 MOVE K3 FINE K4 ZOOM", C_DIM);
-            cv_text(4, y + 58, &FONT_S, "OCT+ SPLIT OCT- DEL EDIT EXIT", C_DIM);
+            slice_edit_legend(y + 40, LEGEND_KNOBS);
+            slice_edit_legend(y + 58, LEGEND_KEYS);
         }
         cv_oy = 0;
         cv_blit(0, H_HEAD + 1 + pass * 124u);
     }
+}
+
+/* ui_leds: the keys that play the selected slice (bit k = key k), as kb_map and slice_note_on map them */
+static uint32_t slice_edit_keys(void)
+{
+    const slc_src_t *s = se.on ? slc_get(se.src) : 0;
+    const track_t *t = TSEL;
+    uint32_t k, n = s ? slc_count(s, SLC_DIV_MAN) : 0u, mask = 0;
+    if (!n || song.sel >= NPART)
+        return 0;
+    for (k = 0; k < 27u; k++)
+        if (slc_note_slice(t->p, kb_map(t, k), n) == se.sel)
+            mask |= 1u << k;
+    return mask;
 }
 
 /* ui_draw: 1 = SLICE EDIT is open and drew the screen */
