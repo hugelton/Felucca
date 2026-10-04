@@ -28,7 +28,7 @@ const HERE = new URL(".", import.meta.url).pathname;
 const html = readFileSync(join(HERE, "editor.html"), "utf8");
 const proto = html.slice(html.indexOf("/*PROTO-BEGIN*/"), html.indexOf("/*PROTO-END*/"));
 const E = vm.runInNewContext(proto + `
-;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, rootFromName, buildSlot, makeMockDevice, CMD, SMP,
+;({ frame, unframe, parse, req, Link, parseWav, resample, normalize, takeSample, autoTrim, rootFromName, buildSlot, makeMockDevice, CMD, SMP,
    UP, bank, capturePatch, auditionPatch, startWatch, libraryFile, readLibraryFile, paramKeys, patternFromSteps, stepsFromPattern, upName,
    mixer, GM_DRUM, drumName, parseNotes })`,
 { setTimeout, clearTimeout, setInterval, clearInterval, console });
@@ -503,6 +503,22 @@ function samplesMatch() {
   execFileSync("python3", [join(HERE, "../tools/fm1_sample_upload.py"), "build", "Mix ä 12345", join(dir, "slot"), ...files]);
   const pyHdr = readFileSync(join(dir, "slot.hdr")), pyData = readFileSync(join(dir, "slot.bin"));
   ok(eq(js.hdr, pyHdr) && eq(js.data, pyData), `samples: editor == sampleio.py (${files.length} WAV formats, ${js.data.length} B)`);
+
+  /* recording / trimming: takeSample (a cut of the raw input, faded at the cuts, normalised), autoTrim */
+  const R = E.SMP.RATE, raw = new Float64Array(R);       /* 1 s: silence, a tone from 0.25 to 0.6 s, silence */
+  for (let i = Math.round(R * 0.25); i < Math.round(R * 0.6); i++) raw[i] = Math.sin(i * 0.2) * 0.3;
+  ok(eq(E.takeSample(raw, 0, raw.length), E.normalize(raw)) && eq(E.takeSample(raw, -9, 1e9), E.normalize(raw)),
+    "samples: the whole input == normalize (files load as before); the ends are clamped");
+  const [a, b] = E.autoTrim(raw), on = Math.round(R * 0.25), off = Math.round(R * 0.6);
+  ok(a <= on && on - a <= Math.round(R * 0.005) + 2 && b >= off - 2 && b - off <= Math.round(R * 0.02) + 1,
+    `samples: autoTrim finds the sound (${a}..${b} for ${on}..${off}: 5 ms before, 20 ms after)`);
+  ok(E.autoTrim(new Float64Array(500)).join() === "0,500", "samples: autoTrim of silence keeps all");
+  const cut = E.takeSample(raw, on + 1000, on + 3000);
+  let pk = 0;
+  for (const v of cut) pk = Math.max(pk, Math.abs(v));
+  ok(cut.length === 2000 && cut[0] === 0 && Math.abs(cut[1999]) < 1000 && pk === 30000 &&
+     Math.abs(cut[22]) < Math.abs(cut[22 + 63]) + 30000 * 0.6,
+    "samples: a cut: its length, faded to 0 at both cut ends, peak normalised");
 }
 
 /* ------------------------------------------------------- packages: JS == Python --- */

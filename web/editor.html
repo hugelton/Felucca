@@ -66,6 +66,8 @@
   .smp.over { outline: 1px solid var(--fg); outline-offset: 2px; }
   .smp .head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
   .smp .head b { font-weight: 600; min-width: 40px; }
+  .smp canvas.trim { width: 100%; height: 56px; display: block; touch-action: none; cursor: ew-resize; }
+  .smp progress.rec { width: 120px; }
   .smp progress { width: 160px; height: 6px; accent-color: var(--fg); }
   .smp table { margin: 4px 0; }
   .smp input.name { width: 80px; text-transform: uppercase; }
@@ -737,6 +739,35 @@ function normalize(x) {
   let pk = 1e-9;
   for (const v of x) pk = Math.max(pk, Math.abs(v));
   return Int16Array.from(x, (v) => Math.max(-32768, Math.min(32767, Math.trunc(v / pk * 30000))));
+}
+
+/* a trimmed sample: raw (mono float at SMP.RATE) from a to b, a fade of FADE samples at both cut ends
+ * (no click where the sound was cut; none at the file's own start and end), normalised */
+const FADE = 44;                                     /* 2 ms at 22050 Hz */
+function takeSample(raw, a, b) {
+  a = Math.max(0, Math.min(raw.length - 1, a | 0));
+  b = Math.max(a + 1, Math.min(raw.length, b | 0));
+  const x = Float64Array.from(raw.subarray ? raw.subarray(a, b) : raw.slice(a, b));
+  const n = Math.min(FADE, x.length >> 1);
+  for (let i = 0; i < n; i++) {
+    const g = i / n;
+    if (a > 0) x[i] *= g;
+    if (b < raw.length) x[x.length - 1 - i] *= g;
+  }
+  return normalize(x);
+}
+
+/* where the sound is: the first and last sample above rel x the peak, with a 5 ms pre-roll and a
+ * 20 ms tail; [0, length] for silence */
+function autoTrim(raw, rel = 0.02) {
+  let pk = 0;
+  for (const v of raw) pk = Math.max(pk, Math.abs(v));
+  if (!pk) return [0, raw.length];
+  const th = pk * rel;
+  let a = 0, b = raw.length - 1;
+  while (a < raw.length && Math.abs(raw[a]) < th) a++;
+  while (b > a && Math.abs(raw[b]) < th) b--;
+  return [Math.max(0, a - Math.round(SMP.RATE * 0.005)), Math.min(raw.length, b + 1 + Math.round(SMP.RATE * 0.02))];
 }
 
 /* root from a file name like "piano_C4" or "F#3" (C4 = 60), else 60 (sampleio.note_from_name) */
@@ -1530,7 +1561,7 @@ const GLYPH = {
   control_arrow_loop: 0xEAD6, note_eight: 0xEAEF, symbol_waves: 0xEAE6, function_env_adsr_exp: 0xEA12,
   ui_knob: 0xEA70, symbol_keyboard: 0xEABC, symbol_effector: 0xEAB7, symbol_echo: 0xEAB5, symbol_spring: 0xEAD1,
   symbol_tuning: 0xEAA7, control_arrow_up_down: 0xEACF, symbol_grid: 0xEABA, symbol_cog: 0xEA46, symbol_drum: 0xEA66,
-  function_filter_lpf_peak: 0xEAA0, ui_slider_vertical: 0xEA73, symbol_books: 0xEADC, control_rec_f: 0xEA09,
+  function_filter_lpf_peak: 0xEAA0, ui_slider_vertical: 0xEA73, symbol_books: 0xEADC, control_rec_f: 0xEA09, control_stop_f: 0xEA0F,
   symbol_pan: 0xEA53, control_speaker_mute: 0xEAEB,
   waveform_sine: 0xEA85, waveform_triangle_ac: 0xEA89, waveform_sawtooth_ac: 0xEA81, waveform_square: 0xEA87,
   waveform_pulse_quarter: 0xEA7F, waveform_pulse_eighth: 0xEA7B, waveform_noise_step: 0xEA79,
@@ -1579,9 +1610,11 @@ const TEXT = {
     savedSlot: "保存しました: スロット ", loadedSlot: "読み込みました: スロット ", emptySlot: "空のスロットです: ",
     confirmSave: "スロット {n} に上書き保存しますか？", confirmLoad: "スロット {n} を読み込みますか？ 今の音色とパターンは置き換わります。",
     confirmClear: "シーケンスを全部消しますか？", confirmInit: "音色を初期化しますか？",
-    samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。",
+    samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。「録音」でコンピューターの入力から録音できます。波形の両端をドラッグすると切り取れます。",
     zones: "ゾーン", smpName: "名前", chooseFiles: "ファイルを選ぶ", upload: "書き込む", erase: "消去", clearList: "リストを消す",
     file: "ファイル", root: "ルート", keys: "鍵盤", length: "長さ", remove: "外す",
+    record: "録音", stopRec: "停止", recInput: "入力", recDenied: "録音できません", recFull: "スロットがいっぱいです",
+    preview: "試聴", autoTrim: "自動トリム", trim: "切り取り",
     smpTooBig: "大きすぎます", smpDecodeFail: "読み込めません: ", smpUploading: "書き込み中 USR", smpDone: "書き込みました USR",
     smpFail: "サンプルの書き込みに失敗しました: ", smpErased: "消去しました USR",
     confirmErase: "USR{n} を消去しますか？", confirmUpload: "USR{n} に書き込みますか？ 今の内容は消えます。",
@@ -1639,9 +1672,11 @@ const TEXT = {
     savedSlot: "Saved to slot ", loadedSlot: "Loaded slot ", emptySlot: "Empty slot: ",
     confirmSave: "Overwrite slot {n}?", confirmLoad: "Load slot {n}? The current sound and pattern will be replaced.",
     confirmClear: "Clear the whole sequence?", confirmInit: "Reset the sound to the engine defaults?",
-    samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine).",
+    samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine). Record takes a sample from the computer's input. Drag the ends of a waveform to trim it.",
     zones: "zones", smpName: "Name", chooseFiles: "Choose files", upload: "Upload", erase: "Erase", clearList: "Clear list",
     file: "File", root: "Root", keys: "Keys", length: "Length", remove: "Remove",
+    record: "Record", stopRec: "Stop", recInput: "Input", recDenied: "Cannot record", recFull: "The slot is full",
+    preview: "Play", autoTrim: "Auto trim", trim: "Trim",
     smpTooBig: "too large", smpDecodeFail: "Cannot read: ", smpUploading: "Uploading USR", smpDone: "Uploaded USR",
     smpFail: "Sample upload failed: ", smpErased: "Erased USR",
     confirmErase: "Erase USR{n}?", confirmUpload: "Write to USR{n}? Its current contents will be replaced.",
@@ -2368,7 +2403,166 @@ async function decodeFile(f) {
     for (let c = 0; c < ab.numberOfChannels; c++) { const d = ab.getChannelData(c); for (let i = 0; i < d.length; i++) x[i] += d[i] / ab.numberOfChannels; }
   }
   if (!x.length) throw new Error("no audio");
-  return { fname: f.name, s: normalize(x), root: rootFromName(f.name.replace(/\.[^.]*$/, "")) };
+  const raw = Float64Array.from(x);                 /* kept for trimming: s is raw[a, b) (takeSample) */
+  return { fname: f.name, raw, a: 0, b: raw.length, s: takeSample(raw, 0, raw.length),
+           root: rootFromName(f.name.replace(/\.[^.]*$/, "")) };
+}
+
+/* ---- recording: the computer's input (getUserMedia, no echo cancelling / noise suppression / AGC),
+ * raw PCM through an AudioWorklet, mixed to mono; it stops by itself when the slot is full */
+const REC_WORKLET = `registerProcessor("felucca-rec", class extends AudioWorkletProcessor {
+  process(inputs) {
+    const i = inputs[0];
+    if (i && i.length && i[0].length) {
+      const n = i[0].length, m = new Float32Array(n);
+      for (let c = 0; c < i.length; c++) for (let k = 0; k < n; k++) m[k] += i[c][k] / i.length;
+      this.port.postMessage(m, [m.buffer]);
+    }
+    return true;
+  }
+});`;
+let rec = null;                                     /* the recording: { k, ctx, stream, chunks, n, max, peak } */
+let recDevice = "", recInputs = [];                 /* the chosen input (deviceId, "" = default), the inputs */
+
+async function listInputs() {
+  try { recInputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput"); }
+  catch (e) { recInputs = []; }
+}
+
+async function recStart(k) {
+  const d = smpDraft[k], left = SMP.MAX_DATA - draftBytes(d);   /* bytes: two samples each */
+  if (rec || smpBusy) return;
+  if (left < 1024 || d.files.length >= SMP.MAX_ZONES) { sayK("recFull"); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      deviceId: recDevice ? { exact: recDevice } : undefined,
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const ctx = new AudioContext();
+    const url = URL.createObjectURL(new Blob([REC_WORKLET], { type: "text/javascript" }));
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    const node = new AudioWorkletNode(ctx, "felucca-rec"), mute = ctx.createGain();
+    mute.gain.value = 0;                            /* pulled by the graph, but nothing is heard */
+    ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
+    rec = { k, ctx, stream, chunks: [], n: 0, max: Math.floor(left * 2 * ctx.sampleRate / SMP.RATE), peak: 0 };
+    node.port.onmessage = (e) => {
+      const r = rec;
+      if (!r || r.ctx !== ctx) return;
+      r.chunks.push(e.data);
+      r.n += e.data.length;
+      for (const v of e.data) r.peak = Math.max(r.peak, Math.abs(v));
+      if (r.n >= r.max) recStop();
+    };
+    await listInputs();                             /* the labels come with the permission */
+    renderSamples();
+    requestAnimationFrame(recTick);
+  } catch (e) {
+    rec = null;
+    sayK("recDenied", e.message);
+    renderSamples();
+  }
+}
+
+/* the time and the level while recording (no re-render) */
+function recTick() {
+  if (!rec) return;
+  const box = $("smpslots").querySelector(`[data-k="${rec.k}"]`);
+  const lv = box && box.querySelector("progress.rec"), tm = box && box.querySelector(".rectime");
+  if (lv) lv.value = Math.min(1, rec.peak);
+  if (tm) tm.textContent = `${(rec.n / rec.ctx.sampleRate).toFixed(1)} / ${(rec.max / rec.ctx.sampleRate).toFixed(1)} s`;
+  rec.peak *= 0.8;
+  requestAnimationFrame(recTick);
+}
+
+async function recStop() {
+  const r = rec;
+  if (!r) return;
+  rec = null;
+  r.stream.getTracks().forEach((tr) => tr.stop());
+  await r.ctx.close();
+  const x = new Float64Array(Math.min(r.n, r.max));
+  let o = 0;
+  for (const c of r.chunks) {
+    const n = Math.min(c.length, x.length - o);
+    x.set(c.subarray(0, n), o);
+    o += n;
+  }
+  const raw = Float64Array.from(resample(x, r.ctx.sampleRate, SMP.RATE));
+  const d = smpDraft[r.k];
+  if (raw.length > 1 && d.files.length < SMP.MAX_ZONES) {
+    const [a, b] = autoTrim(raw);
+    d.files.push({ fname: `REC ${d.files.length + 1}`, raw, a, b, s: takeSample(raw, a, b), root: 60 });
+    if (!d.name) d.name = "REC";
+  }
+  renderSamples();
+}
+
+/* ---- trimming: the waveform of raw with its two ends, dragged with a pointer */
+function drawTrim(cv, f) {
+  const w = cv.width, h = cv.height, g = cv.getContext("2d"), cs = getComputedStyle(cv);
+  const fg = cs.getPropertyValue("--fg").trim() || "#000", line = cs.getPropertyValue("--line").trim() || "#ccc";
+  const xa = f.a / f.raw.length * w, xb = f.b / f.raw.length * w;
+  let pk = 1e-9;
+  for (const v of f.raw) pk = Math.max(pk, Math.abs(v));
+  g.clearRect(0, 0, w, h);
+  for (let x = 0; x < w; x++) {                     /* per column: the smallest and largest sample */
+    const i0 = Math.floor(x / w * f.raw.length), i1 = Math.max(i0 + 1, Math.floor((x + 1) / w * f.raw.length));
+    let lo = 0, hi = 0;
+    for (let i = i0; i < i1; i++) { lo = Math.min(lo, f.raw[i]); hi = Math.max(hi, f.raw[i]); }
+    g.fillStyle = x >= xa && x < xb ? fg : line;
+    g.fillRect(x, h / 2 - hi / pk * (h / 2 - 2), 1, Math.max(1, (hi - lo) / pk * (h / 2 - 2)));
+  }
+  g.fillStyle = fg;
+  g.fillRect(Math.min(w - 2, xa), 0, 2, h);
+  g.fillRect(Math.max(0, xb - 2), 0, 2, h);
+}
+
+function trimCanvas(f) {
+  const cv = el("canvas", { class: "trim", width: 600, height: 56, title: t("trim") });
+  let end = null;                                   /* "a" or "b": the end being dragged */
+  const at = (e) => {
+    const r = cv.getBoundingClientRect();
+    return Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * f.raw.length);
+  };
+  cv.addEventListener("pointerdown", (e) => {
+    if (smpBusy) return;
+    const p = at(e);
+    end = Math.abs(p - f.a) <= Math.abs(p - f.b) ? "a" : "b";
+    cv.setPointerCapture(e.pointerId);
+    cv.dispatchEvent(new PointerEvent("pointermove", e));
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (!end) return;
+    const p = at(e), min = Math.round(SMP.RATE * 0.01);   /* at least 10 ms */
+    if (end === "a") f.a = Math.max(0, Math.min(p, f.b - min));
+    else f.b = Math.min(f.raw.length, Math.max(p, f.a + min));
+    drawTrim(cv, f);
+  });
+  const done = () => {
+    if (!end) return;
+    end = null;
+    f.s = takeSample(f.raw, f.a, f.b);
+    renderSamples();                                /* the length and the slot size change */
+  };
+  cv.addEventListener("pointerup", done);
+  cv.addEventListener("pointercancel", done);
+  requestAnimationFrame(() => drawTrim(cv, f));     /* (once it is in the page: its colours) */
+  return cv;
+}
+
+/* play the trimmed sample as it will be stored (22050 Hz) */
+let previewSrc = null, previewCtx = null;
+function preview(f) {
+  try {
+    if (previewSrc) previewSrc.stop();
+    previewCtx = previewCtx || new AudioContext();
+    const buf = previewCtx.createBuffer(1, f.s.length, SMP.RATE), ch = buf.getChannelData(0);
+    for (let i = 0; i < f.s.length; i++) ch[i] = f.s[i] / 32768;
+    previewSrc = previewCtx.createBufferSource();
+    previewSrc.buffer = buf;
+    previewSrc.connect(previewCtx.destination);
+    previewSrc.start();
+  } catch (e) { /* no audio output: nothing to play */ }
 }
 
 async function addFiles(k, list) {
@@ -2382,6 +2576,22 @@ async function addFiles(k, list) {
     } catch (e) { sayK("smpDecodeFail", `${f.name} (${e.message})`); }
   }
   renderSamples();
+}
+
+/* a slot's recording row: Record / Stop, the input, the time and the level */
+function recRow(k) {
+  const on = rec && rec.k === k;
+  const sel = el("select", { title: t("recInput"), disabled: !!rec },
+    el("option", { value: "", text: t("recInput") }),
+    ...recInputs.map((d, i) => el("option", { value: d.deviceId, text: d.label || `${t("recInput")} ${i + 1}` })));
+  sel.value = recDevice;
+  sel.addEventListener("change", () => { recDevice = sel.value; });
+  return el("div", { class: "head" },
+    el("button", { ic: on ? "control_stop_f" : "control_rec_f", disabled: smpBusy || (!!rec && !on),
+      onclick: () => (on ? recStop() : recStart(k)) }, t(on ? "stopRec" : "record")),
+    recInputs.length ? sel : "",
+    on ? el("progress", { class: "rec", max: 1, value: 0 }) : "",
+    on ? el("span", { class: "rectime dim" }) : "");
 }
 
 function renderSamples() {
@@ -2409,9 +2619,10 @@ function renderSamples() {
         el("button", { ic: "symbol_trash", disabled: smpBusy || !u.zones, onclick: () => smpErase(k) }, t("erase"))),
       el("div", { class: "head" }, el("span", { text: t("smpName") }), name,
         el("button", { ic: "symbol_folder_open", disabled: smpBusy, onclick: () => file.click() }, t("chooseFiles")), file,
-        el("button", { ic: "symbol_upload", disabled: smpBusy || !d.files.length || tooBig || !d.name, onclick: () => smpUpload(k, prog) }, t("upload")),
-        d.files.length ? el("button", { text: t("clearList"), disabled: smpBusy, onclick: () => { d.files = []; renderSamples(); } }) : "",
-        size, prog));
+        el("button", { ic: "symbol_upload", disabled: smpBusy || !!rec || !d.files.length || tooBig || !d.name, onclick: () => smpUpload(k, prog) }, t("upload")),
+        d.files.length ? el("button", { text: t("clearList"), disabled: smpBusy || !!rec, onclick: () => { d.files = []; renderSamples(); } }) : "",
+        size, prog),
+      recRow(k));
     if (d.files.length) {
       const keys = splitKeys(d.files);
       const tb = el("table", {}, el("tr", {}, el("th", { text: t("file") }), el("th", { text: t("root") }),
@@ -2428,6 +2639,15 @@ function renderSamples() {
           el("td", { text: `${noteName(keys[i][0])}–${noteName(keys[i][1])}` }),
           el("td", { text: `${(f.s.length / SMP.RATE).toFixed(2)} s` }),
           el("td", {}, el("button", { text: t("remove"), disabled: smpBusy, onclick: () => { d.files.splice(i, 1); renderSamples(); } }))));
+        if (f.raw)                                  /* the waveform: drag its ends to trim */
+          tb.append(el("tr", { class: "trimrow" }, el("td", { colspan: 4 }, trimCanvas(f)),
+            el("td", {},
+              el("button", { text: t("preview"), onclick: () => preview(f) }),
+              el("button", { text: t("autoTrim"), disabled: smpBusy, onclick: () => {
+                [f.a, f.b] = autoTrim(f.raw);
+                f.s = takeSample(f.raw, f.a, f.b);
+                renderSamples();
+              } }))));
       });
       blk.append(tb);
     }
