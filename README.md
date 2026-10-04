@@ -22,7 +22,7 @@ Multi-engine synthesizer firmware for the M-VAVE FM-1.
 - **Arpeggiator**, scales and quantize, glide, MONO / LEGATO / UNISON voice modes
 - **Effects:** distortion and the SLICER per track; chorus, delay and reverb sends; master limiter
 - **Presets:** factory presets with their own patterns, 32 user preset slots, 4 project slots
-- **Web editor:** every parameter of every track, step grid, track mixer, preset library, sample upload
+- **Web editor:** every parameter of every track, step grid, track mixer, preset library, sample upload (record from the computer's input, trim on the waveform)
 - **USB:** class-compliant MIDI in and out (channels 1–3 for the parts, 10 for drums);
   updates over the same USB cable
 
