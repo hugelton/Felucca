@@ -1621,7 +1621,7 @@ const TEXT = {
     savedSlot: "保存しました: スロット ", loadedSlot: "読み込みました: スロット ", emptySlot: "空のスロットです: ",
     confirmSave: "スロット {n} に上書き保存しますか？", confirmLoad: "スロット {n} を読み込みますか？ 今の音色とパターンは置き換わります。",
     confirmClear: "シーケンスを全部消しますか？", confirmInit: "音色を初期化しますか？",
-    samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。「録音」でコンピューターの入力から録音できます。波形の両端をドラッグすると切り取れます（ホイールで拡大、Shift+ホイールで移動、ダブルクリックで全体）。",
+    samples: "サンプル", smpHelp: "WAV をドロップするか選んでください。1 スロットに 16 ファイルまで、モノ 22050 Hz の ADPCM で合計約 7 秒。SAMPLE エンジンの SET（または SLICE エンジンの SRC）で USR1〜USR3 を選ぶと鳴ります。「録音」でコンピューターの入力から録音できます。波形の両端をドラッグすると切り取れます（ホイールで拡大、拡大中は波形をドラッグして移動、ダブルクリックで全体）。",
     zones: "ゾーン", smpName: "名前", chooseFiles: "ファイルを選ぶ", upload: "書き込む", erase: "消去", clearList: "リストを消す",
     file: "ファイル", root: "ルート", keys: "鍵盤", length: "長さ", remove: "外す",
     record: "録音", stopRec: "停止", recInput: "入力", recDenied: "録音できません", recFull: "スロットがいっぱいです", recSilent: "無音でした。入力を確かめてください",
@@ -1683,7 +1683,7 @@ const TEXT = {
     savedSlot: "Saved to slot ", loadedSlot: "Loaded slot ", emptySlot: "Empty slot: ",
     confirmSave: "Overwrite slot {n}?", confirmLoad: "Load slot {n}? The current sound and pattern will be replaced.",
     confirmClear: "Clear the whole sequence?", confirmInit: "Reset the sound to the engine defaults?",
-    samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine). Record takes a sample from the computer's input. Drag the ends of a waveform to trim it (the wheel zooms, Shift + wheel scrolls, a double click shows it all).",
+    samples: "Samples", smpHelp: "Drop or choose WAV files. Up to 16 files per slot, stored as mono 22050 Hz ADPCM (about 7 s in all). Select USR1–USR3 with SET on the SAMPLE engine (or SRC on the SLICE engine). Record takes a sample from the computer's input. Drag the ends of a waveform to trim it (the wheel zooms; zoomed in, drag the waveform to scroll; a double click shows it all).",
     zones: "zones", smpName: "Name", chooseFiles: "Choose files", upload: "Upload", erase: "Erase", clearList: "Clear list",
     file: "File", root: "Root", keys: "Keys", length: "Length", remove: "Remove",
     record: "Record", stopRec: "Stop", recInput: "Input", recDenied: "Cannot record", recFull: "The slot is full", recSilent: "Silence: check the input",
@@ -2517,7 +2517,8 @@ async function recStop() {
 }
 
 /* ---- trimming: the waveform of raw with its two ends, dragged with a pointer; the wheel zooms
- * (at the pointer), shift + wheel moves the view, a double click shows it all. The view, [v0, v1)
+ * (at the pointer); zoomed in, a drag away from the ends (or shift + wheel) moves the view; a double
+ * click shows it all. The view, [v0, v1)
  * of raw, is kept in the file (the list is drawn again after every trim). */
 function drawTrim(cv, f) {
   const w = cv.width, h = cv.height - 4, g = cv.getContext("2d"), cs = getComputedStyle(cv);
@@ -2562,21 +2563,55 @@ function trimCanvas(f) {
     drawTrim(cv, f);
   }, { passive: false });
   cv.addEventListener("dblclick", () => { f.v0 = 0; f.v1 = f.raw.length; drawTrim(cv, f); });
+  /* a press within GRAB px of an end drags that end; elsewhere it drags the view (zoomed), or moves
+   * the nearer end (the whole input shown: nothing to scroll) */
+  const GRAB = 10;
+  let pan = null;                                   /* dragging the view: { x, v0, span } */
+  const zoomed = () => (f.v1 ?? f.raw.length) - (f.v0 ?? 0) < f.raw.length;
+  const near = (e) => {                             /* the end within GRAB px of the pointer, or null */
+    const r = cv.getBoundingClientRect(), v0 = f.v0 ?? 0, span = (f.v1 ?? f.raw.length) - v0;
+    const da = Math.abs(e.clientX - (r.left + (f.a - v0) / span * r.width));
+    const db = Math.abs(e.clientX - (r.left + (f.b - v0) / span * r.width));
+    return Math.min(da, db) > GRAB ? null : da <= db ? "a" : "b";
+  };
   cv.addEventListener("pointerdown", (e) => {
     if (smpBusy) return;
     const p = at(e);
-    end = Math.abs(p - f.a) <= Math.abs(p - f.b) ? "a" : "b";
+    end = near(e);
+    if (!end && zoomed()) {
+      pan = { x: e.clientX, v0: f.v0 ?? 0, span: (f.v1 ?? f.raw.length) - (f.v0 ?? 0) };
+      cv.style.cursor = "grabbing";
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
+    end = end || (Math.abs(p - f.a) <= Math.abs(p - f.b) ? "a" : "b");
     cv.setPointerCapture(e.pointerId);
     cv.dispatchEvent(new PointerEvent("pointermove", e));
   });
   cv.addEventListener("pointermove", (e) => {
-    if (!end) return;
+    if (pan) {
+      const r = cv.getBoundingClientRect();
+      const a = Math.round(pan.v0 - (e.clientX - pan.x) / r.width * pan.span);
+      f.v0 = Math.max(0, Math.min(f.raw.length - pan.span, a));
+      f.v1 = f.v0 + pan.span;
+      drawTrim(cv, f);
+      return;
+    }
+    if (!end) {                                     /* hovering: what a press would do */
+      cv.style.cursor = near(e) || !zoomed() ? "ew-resize" : "grab";
+      return;
+    }
     const p = at(e), min = Math.round(SMP.RATE * 0.01);   /* at least 10 ms */
     if (end === "a") f.a = Math.max(0, Math.min(p, f.b - min));
     else f.b = Math.min(f.raw.length, Math.max(p, f.a + min));
     drawTrim(cv, f);
   });
   const done = () => {
+    if (pan) {                                      /* the view moved: nothing else changes */
+      pan = null;
+      cv.style.cursor = "grab";
+      return;
+    }
     if (!end) return;
     end = null;
     f.s = takeSample(f.raw, f.a, f.b);
