@@ -492,6 +492,49 @@ int main(int argc, char **argv)
             ok &= slc_man_of(s)->n == keep.n && !memcmp(slc_man_of(s)->pos, keep.pos, n * 4u);   /* untouched */
             check("MAN store: bad tables are refused and change nothing", ok, 0);
         }
+
+        {   /* edits while a slice plays backwards; tables with no room to move */
+            static slc_src_t tiny, keep_src;
+            slc_man_t t2;
+            uint32_t pa, k;
+            ok = 1;
+            s = slc_get(1);
+            host_tracks_init();
+            host_preset(t, SLC_ENG, 0);
+            t->p[P_E0] = 1;
+            t->p[P_E1] = SLC_DIV_MAN;
+            t->p[P_E5] = 1;                                /* REV */
+            t->p[P_E4] = SLC_LOOP;
+            trk_note_on(t, 62, 100);                       /* slice 2, backwards, looping */
+            v = voice_of(t, 62);
+            blocks(8);
+            pa = slc_man_of(s)->pos[2];
+            m = slc_man_begin(1);
+            slc_man_move(s, m, 2, 100000);                 /* its start past the playhead */
+            slc_man_commit(1);
+            for (k = 0; k < 400u && v && v->active; k++)
+                blocks(1);
+            ok &= slc_man_of(s)->pos[2] > pa && !(v && v->active);
+            trk_note_off(t, 62);
+            check("MAN: a start moved past a reverse voice ends it (no window past its buffer)", ok, 0);
+
+            ok = 1;
+            tiny = SLC_BREAK;                              /* a material shorter than two slices */
+            tiny.len = 100;
+            memset(&t2, 0, sizeof t2);
+            t2.n = 1;
+            ok &= slc_man_move(&tiny, &t2, 0, 50) == 36u && slc_man_move(&tiny, &t2, 0, -50) == 0u;
+            ok &= slc_man_split(&tiny, &t2, 0) == 0u && t2.n == 1u;            /* 100 < 2 x 64 */
+            tiny.len = 50;                                  /* shorter than one */
+            ok &= slc_man_move(&tiny, &t2, 0, 10) == 0u && slc_man_move_end(&tiny, &t2, 0, -10) == 50u && !t2.end;
+            keep_src = slc_usr[0];                         /* AUTO's last hit 10 samples before the end */
+            slc_usr[0].apos[slc_usr[0].nauto - 1u] = slc_usr[0].len - 10u;
+            slc_man[1][0].n = slc_man[1][1].n = 0;         /* no MAN in use: begin copies AUTO */
+            m = slc_man_begin(1);
+            ok &= m->n == slc_usr[0].nauto - 1u && !man_check(s, m);
+            slc_usr[0] = keep_src;
+            check("MAN: no room to move or split: nothing moves; AUTO hits too close are left out", ok, 0);
+        }
     }
 
     /* 5 */

@@ -39,18 +39,26 @@ static void slice_edit_close(void)                  /* the slices go to flash (i
     slc_store_save();
 }
 
+/* the source the selected part plays (an empty slot plays BREAK), as slice_note_on picks it */
+static uint32_t slice_edit_src(void)
+{
+    uint32_t src = (uint32_t)TSEL->p[P_E0] & 3u;
+    return slc_get(src) ? src : 0u;
+}
+
 static void slice_edit_open(void)
 {
     track_t *t = TSEL;
-    uint32_t src = (uint32_t)t->p[P_E0] & 3u;
-    if (!slc_get(src))
-        src = 0;                                    /* an empty slot plays BREAK: edit that */
+    uint32_t src = slice_edit_src();
     if (!slc_get(src)) {
         ui_message("NO SAMPLE");
         return;
     }
-    slc_man_begin(src);                             /* puts a table in use (the AUTO slices at first) */
-    slc_man_commit(src);
+    if (!slc_man_begin(src)->n) {                   /* shorter than SLC_MIN: nothing to cut */
+        ui_message("SAMPLE TOO SHORT");
+        return;
+    }
+    slc_man_commit(src);                            /* puts a table in use (the AUTO slices at first) */
     t->p[P_E1] = SLC_DIV_MAN;
     se.on = 1;
     se.src = (uint8_t)src;
@@ -66,7 +74,7 @@ static void slice_edit_view(const slc_src_t *s, const slc_man_t *m)
 {
     uint32_t j = se.sel < m->n ? se.sel : 0u;
     uint32_t c = !se.focus ? m->pos[j] : j + 1u < m->n ? m->pos[j + 1u] : slc_man_end(s, m);
-    se.span = s->len >> se.zoom;
+    se.span = s->len >> se.zoom ? s->len >> se.zoom : 1u;
     se.view = c > se.span / 2u ? c - se.span / 2u : 0u;
     if (se.view + se.span > s->len)
         se.view = s->len - se.span;
@@ -78,8 +86,8 @@ static void slice_edit_input(uint32_t pressed)
     const slc_man_t *cur = s ? slc_man_of(s) : 0;
     slc_man_t *m;
     int32_t d, col;
-    if (!cur || ENGINES[TSEL->engine] != &ENG_SLICE || song.sel >= NPART) {
-        slice_edit_close();                         /* the slot changed (an upload) or the sound did */
+    if (!cur || song.sel >= NPART || ENGINES[TSEL->engine] != &ENG_SLICE || slice_edit_src() != se.src) {
+        slice_edit_close();                         /* the slot changed (an upload), or the sound or its SRC */
         return;
     }
     if ((pressed >> panel.btn[B_PLAY]) & 1u)

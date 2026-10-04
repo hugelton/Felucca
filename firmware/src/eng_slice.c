@@ -288,13 +288,15 @@ static slc_man_t *slc_man_begin(uint32_t src)
     uint32_t i;
     if (cur->n) {
         *m = *cur;
-    } else {
-        m->n = s ? s->nauto : 0u;
+    } else {                                        /* the AUTO starts that keep SLC_MIN (to the end too) */
+        m->n = 0;
         m->end = 0;
-        for (i = 0; i < m->n; i++) {
-            m->pos[i] = s->apos[i];
-            m->st[i] = s->ast[i];
-        }
+        for (i = 0; s && i < s->nauto; i++)
+            if (s->apos[i] < s->len && s->len - s->apos[i] >= SLC_MIN &&
+                (!m->n || s->apos[i] - m->pos[m->n - 1u] >= SLC_MIN)) {
+                m->pos[m->n] = s->apos[i];
+                m->st[m->n++] = s->ast[i];
+            }
     }
     return m;
 }
@@ -312,7 +314,9 @@ static uint32_t slc_man_move(const slc_src_t *s, slc_man_t *m, uint32_t j, int32
     if (j >= m->n)
         return 0u;
     lo = j ? (int32_t)(m->pos[j - 1u] + SLC_MIN) : 0;
-    hi = (int32_t)((j + 1u < m->n ? m->pos[j + 1u] : slc_man_end(s, m)) - SLC_MIN);
+    hi = (int32_t)(j + 1u < m->n ? m->pos[j + 1u] : slc_man_end(s, m)) - (int32_t)SLC_MIN;
+    if (hi < lo)                                        /* no room (a very short slice pair): stays */
+        return m->pos[j];
     p = clamp((int32_t)m->pos[j] + d, lo, hi);
     if (p != (int32_t)m->pos[j]) {
         m->pos[j] = (uint32_t)p;
@@ -329,8 +333,9 @@ static uint32_t slc_man_move_end(const slc_src_t *s, slc_man_t *m, uint32_t j, i
         return 0u;
     if (j + 1u < m->n)
         return slc_man_move(s, m, j + 1u, d);
-    m->end = (uint32_t)clamp((int32_t)slc_man_end(s, m) + d, (int32_t)(m->pos[j] + SLC_MIN), (int32_t)s->len);
-    return m->end;
+    if (m->pos[j] + SLC_MIN <= s->len)                  /* (else no room: the end stays) */
+        m->end = (uint32_t)clamp((int32_t)slc_man_end(s, m) + d, (int32_t)(m->pos[j] + SLC_MIN), (int32_t)s->len);
+    return slc_man_end(s, m);
 }
 
 /* split slice j in two at its middle; returns the new slice (j + 1), or j if it cannot */
@@ -487,6 +492,8 @@ static inline int slc_rev(const slc_src_t *s, voice_t *v, int16_t *rb, int loop,
     q--;
     if (q < ws || q >= ws + SLC_RB) {
         slc_bounds_v(s, v, &a, &b, &st);
+        if (q < a)                                      /* MAN: the start moved past this voice: it ends */
+            return 0;
         ws = q + 1u >= a + SLC_RB ? q + 1u - SLC_RB : a;
         slc_fill(s, rb, ws, q + 1u - ws, a, st);
         v->s[0] = (int32_t)ws;
