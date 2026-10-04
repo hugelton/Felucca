@@ -2443,12 +2443,14 @@ async function listInputs() {
 }
 
 let recStarting = false;                            /* (the permission prompt can take a while) */
+const recActive = () => !!rec || recStarting;       /* the draft must not change: Upload, files, trims off */
 async function recStart(k) {
   const d = smpDraft[k], left = SMP.MAX_DATA - draftBytes(d);   /* bytes: two samples each */
   if (rec || recStarting || smpBusy) return;
   if (left < 1024 || d.files.length >= SMP.MAX_ZONES) { sayK("recFull"); return; }
   let stream = null, ctx = null;
   recStarting = true;
+  renderSamples();                                  /* (the controls go off during the prompt) */
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: {
       deviceId: recDevice ? { exact: recDevice } : undefined,
@@ -2535,8 +2537,11 @@ function drawTrim(cv, f) {
   const fg = cs.getPropertyValue("--fg").trim() || "#000", line = cs.getPropertyValue("--line").trim() || "#ccc";
   const n = f.raw.length, v0 = f.v0 ?? 0, v1 = f.v1 ?? n, span = v1 - v0;
   const xa = (f.a - v0) / span * w, xb = (f.b - v0) / span * w;
-  let pk = 1e-9;
-  for (const v of f.raw) pk = Math.max(pk, Math.abs(v));
+  if (f.pk === undefined) {                        /* raw never changes: its peak, once */
+    f.pk = 1e-9;
+    for (const v of f.raw) f.pk = Math.max(f.pk, Math.abs(v));
+  }
+  const pk = f.pk;
   g.clearRect(0, 0, w, cv.height);
   for (let x = 0; x < w; x++) {                     /* per column: the smallest and largest sample */
     const i0 = v0 + Math.floor(x / w * span), i1 = Math.max(i0 + 1, v0 + Math.floor((x + 1) / w * span));
@@ -2585,7 +2590,7 @@ function trimCanvas(f) {
     return Math.min(da, db) > GRAB ? null : da <= db ? "a" : "b";
   };
   cv.addEventListener("pointerdown", (e) => {
-    if (smpBusy) return;
+    if (smpBusy || recActive() || e.button !== 0 || !e.isPrimary || end || pan) return;   /* one primary pointer */
     const p = at(e);
     end = near(e);
     if (!end && zoomed()) {
@@ -2711,9 +2716,9 @@ function renderSamples() {
       el("div", { class: "head" }, el("b", { text: `USR${k + 1}` }), el("span", { text: status }), bar,
         el("button", { ic: "symbol_trash", disabled: smpBusy || !u.zones, onclick: () => smpErase(k) }, t("erase"))),
       el("div", { class: "head" }, el("span", { text: t("smpName") }), name,
-        el("button", { ic: "symbol_folder_open", disabled: smpBusy || !!rec, onclick: () => file.click() }, t("chooseFiles")), file,
-        el("button", { ic: "symbol_upload", disabled: smpBusy || !!rec || !d.files.length || tooBig || !d.name, onclick: () => smpUpload(k, prog) }, t("upload")),
-        d.files.length ? el("button", { text: t("clearList"), disabled: smpBusy || !!rec, onclick: () => { d.files = []; renderSamples(); } }) : "",
+        el("button", { ic: "symbol_folder_open", disabled: smpBusy || recActive(), onclick: () => file.click() }, t("chooseFiles")), file,
+        el("button", { ic: "symbol_upload", disabled: smpBusy || recActive() || !d.files.length || tooBig || !d.name, onclick: () => smpUpload(k, prog) }, t("upload")),
+        d.files.length ? el("button", { text: t("clearList"), disabled: smpBusy || recActive(), onclick: () => { d.files = []; renderSamples(); } }) : "",
         size, prog),
       recRow(k));
     if (d.files.length) {
@@ -2731,12 +2736,12 @@ function renderSamples() {
         tb.append(el("tr", {}, el("td", { text: f.fname }), el("td", {}, root),
           el("td", { text: `${noteName(keys[i][0])}–${noteName(keys[i][1])}` }),
           el("td", { text: `${(f.s.length / SMP.RATE).toFixed(2)} s` }),
-          el("td", {}, el("button", { text: t("remove"), disabled: smpBusy || !!rec, onclick: () => { d.files.splice(i, 1); renderSamples(); } }))));
+          el("td", {}, el("button", { text: t("remove"), disabled: smpBusy || recActive(), onclick: () => { d.files.splice(i, 1); renderSamples(); } }))));
         if (f.raw)                                  /* the waveform: drag its ends to trim */
           tb.append(el("tr", { class: "trimrow" }, el("td", { colspan: 4 }, trimCanvas(f)),
             el("td", {},
               el("button", { text: t("preview"), onclick: () => preview(f) }),
-              el("button", { text: t("autoTrim"), disabled: smpBusy, onclick: () => {
+              el("button", { text: t("autoTrim"), disabled: smpBusy || recActive(), onclick: () => {
                 [f.a, f.b] = autoTrim(f.raw);
                 f.s = takeSample(f.raw, f.a, f.b);
                 renderSamples();
@@ -2749,7 +2754,7 @@ function renderSamples() {
     blk.addEventListener("drop", (e) => {
       e.preventDefault();
       blk.classList.remove("over");
-      if (!smpBusy && !rec && e.dataTransfer.files.length) addFiles(k, [...e.dataTransfer.files]);   /* (the recording sized itself to the slot) */
+      if (!smpBusy && !recActive() && e.dataTransfer.files.length) addFiles(k, [...e.dataTransfer.files]);   /* (the recording sized itself to the slot) */
     });
     return blk;
   }));
