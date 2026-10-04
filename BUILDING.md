@@ -52,6 +52,7 @@ Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`):
 | `FELUCCA_OTA` | 1 | update entry (needs `FELUCCA_FLASH`) |
 | `FELUCCA_CDC` | 1 | USB serial console |
 | `FELUCCA_UART` | 0 | TRS MIDI IN (not tested on hardware) |
+| `FELUCCA_SLICE` | 0 | the SLICE engine (sample slicer), added as the last engine (default in `firmware/src/core.h`) |
 
 ## Samples
 
@@ -69,7 +70,8 @@ tests/run_tests.sh
 Runs the host tests (flash storage, user presets, MIDI parser, update entry, update
 loader, a DSP render, the 4-track mix, project formats, the SLICER, the regression suite,
 the command-line installer) and, with Node.js, the web page tests. Run it after `./build.sh`
-(it uses `build/` and needs `AC79_SDK` set as for the build).
+(it uses `build/` and needs `AC79_SDK` set as for the build). The SLICE engine is not built by
+default; to test it, run both `./build.sh` and `tests/run_tests.sh` with `FELUCCA_SLICE=1`.
 
 The regression suite (`tests/regress.c`) renders every engine and preset and compares a
 hash of each render with `tests/golden.txt`; it also checks levels, voices and the CPU

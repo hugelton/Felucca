@@ -58,6 +58,18 @@ run "SLICER: no clicks, timing, sync with the sequencer, STUT, cost, demos" "$OU
 $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/regress" tests/regress.c -lm
 run "regression: golden renders, health, voices, CPU budget" "$OUT/regress" tests/golden.txt tests/cpu_baseline.txt
 # SLICE (tests/slice_test.c) needs a FELUCCA_SLICE=1 build; the engine is not built by default
+if [ "${FELUCCA_SLICE:-0}" = 1 ] && ! grep -q SLC_BREAK_BPM build/gen/felucca_samples.h; then
+    echo "== SLICE: build/ was not made with FELUCCA_SLICE=1 (FELUCCA_SLICE=1 ./build.sh first)"
+    fail=1
+elif [ "${FELUCCA_SLICE:-0}" = 1 ]; then
+    python3 tests/slice_loop.py "$OUT/slice_loop" >/dev/null
+    python3 tools/fm1_sample_upload.py build LOOP "$OUT/slice_loop" "$OUT/slice_loop.wav" >/dev/null
+    $CC -O2 -w -DFELUCCA_SLICE=1 -Ibuild/gen -Ifirmware/src -o "$OUT/slice_test" tests/slice_test.c -lm
+    mkdir -p build/slice_demo
+    run "SLICE: tables, AUTO onsets, REV, keys, ONE / GATE / LOOP, demos" "$OUT/slice_test" "$OUT/slice_loop" build/slice_demo
+else
+    echo "== skip SLICE (FELUCCA_SLICE=1 ./build.sh, then FELUCCA_SLICE=1 sh tests/run_tests.sh)"
+fi
 
 run "regression: target cost of the render loops" python3 tests/target_budget.py \
     build/felucca.dis tests/target_budget.txt

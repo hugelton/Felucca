@@ -13,10 +13,14 @@
  * 5. demos into DEMO_DIR: every preset with its pattern, BREAK re-sequenced, the user loop sliced AUTO. */
 #include <stdarg.h>
 #include <stdint.h>
+#if !FELUCCA_SLICE
+#error "slice_test needs -DFELUCCA_SLICE=1 (SLICE is not in the default build)"
+#endif
 static uint32_t host_slots[3u * 0x14000u / 4u];          /* USR1..3, as the flash at 0xA0000 */
 #define SMP_USER_XIP(k) ((const uint8_t *)host_slots + (k) * SMP_USER_SIZE)
 #define main hostsim_main
 #include "hostsim.c"
+#define SLC_ENG (NENGINES - 1u)                       /* SLICE is built last (core.h, engines.c) */
 #undef main
 
 static int fails;
@@ -139,7 +143,7 @@ static int demo(const char *dir, const demo_t *dm)
         return 1;
     host_tracks_init();
     song.g[G_BPM] = (int16_t)dm->bpm;
-    host_preset(t, 8, dm->preset);
+    host_preset(t, SLC_ENG, dm->preset);
     if (dm->src >= 0)
         t->p[P_E0] = dm->src;
     if (dm->div >= 0)
@@ -284,7 +288,7 @@ int main(int argc, char **argv)
         voice_t *v;
         uint32_t a, b, st, ok = 1;
         host_tracks_init();
-        host_preset(t, 8, 0);                              /* BREAK 16 */
+        host_preset(t, SLC_ENG, 0);                        /* BREAK 16 */
         trk_note_on(t, 65, 100);
         v = voice_of(t, 65);
         slc_bounds(&SLC_BREAK, 2, 5, &a, &b, &st);
@@ -327,7 +331,7 @@ int main(int argc, char **argv)
             voice_t *v;
             uint32_t held, after, k;
             host_tracks_init();
-            host_preset(t, 8, 0);
+            host_preset(t, SLC_ENG, 0);
             t->p[P_E4] = (int16_t)m;
             t->p[P_REL] = 10;
             trk_note_on(t, 60, 100);
