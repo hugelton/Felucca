@@ -295,7 +295,8 @@ static void ui_input(void)
             menu_close();
         } else {
 #if FELUCCA_SLICE
-            se.on = 0;
+            if (se.on)
+                slice_edit_close();
 #endif
             ui.menu = 1;
             ui.menu_sel = 0;

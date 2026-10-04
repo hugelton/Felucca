@@ -244,6 +244,73 @@ typedef struct {
 static persist_t persist_saved;
 #endif
 
+#if FELUCCA_SLICE
+/* SLICE's MAN slices (eng_slice.c), one flash object (OBJ_SLICE): per source the starts and the end,
+ * with the material they were set on (slc_man_ident). At boot, after the slots are read, those that
+ * still fit their material are put in use; SLICE EDIT saves when it closes. */
+typedef struct {
+    uint32_t len, crc;                             /* the material (slc_man_ident) */
+    uint32_t n, end;                               /* n = 0: none */
+    uint32_t pos[SLC_AUTO];
+} slc_store_src_t;
+typedef struct {
+    uint32_t magic;
+    slc_store_src_t src[1 + SMP_USER_SLOTS];
+} slc_store_t;
+#define SLC_STORE_MAGIC 0x31434C53u                /* "SLC1" */
+#if FELUCCA_FLASH
+static slc_store_t slc_saved;                      /* what the flash holds */
+
+static void slc_store_load(void)
+{
+    uint32_t k, len, crc;
+    if (st_load(OBJ_SLICE, &slc_saved, sizeof slc_saved) != (int)sizeof slc_saved ||
+        slc_saved.magic != SLC_STORE_MAGIC) {
+        memset(&slc_saved, 0, sizeof slc_saved);
+        return;
+    }
+    for (k = 0; k <= SMP_USER_SLOTS; k++) {
+        const slc_store_src_t *e = &slc_saved.src[k];
+        slc_man_ident(k, &len, &crc);
+        if (e->n && e->len == len && e->crc == crc)
+            slc_man_restore(k, e->n, e->end, e->pos);
+    }
+}
+#endif
+
+/* SLICE EDIT closed: store the MAN slices in use (no erase when the flash holds them already) */
+static void slc_store_save(void)
+{
+#if FELUCCA_FLASH
+    slc_store_t s;
+    uint32_t k;
+    if (!flash_ok)
+        return;
+    memset(&s, 0, sizeof s);
+    s.magic = SLC_STORE_MAGIC;
+    for (k = 0; k <= SMP_USER_SLOTS; k++) {
+        const slc_src_t *src = slc_get(k);
+        const slc_man_t *m = src ? slc_man_of(src) : 0;
+        slc_store_src_t *e = &s.src[k];
+        if (!m)
+            continue;
+        slc_man_ident(k, &e->len, &e->crc);
+        e->n = m->n;
+        e->end = m->end;
+        memcpy(e->pos, m->pos, m->n * sizeof m->pos[0]);
+    }
+    if (!memcmp(&s, &slc_saved, sizeof s))
+        return;
+    if (st_save(OBJ_SLICE, &s, sizeof s) == 0) {
+        slc_saved = s;
+        ui_message("SLICES SAVED");
+    } else {
+        ui_message("SAVE ERROR");
+    }
+#endif
+}
+#endif
+
 static void persist_boot(void)                    /* before settings_init / panel_init */
 {
 #if FELUCCA_FLASH
@@ -260,6 +327,9 @@ static void persist_boot(void)                    /* before settings_init / pane
         for (k = 0; k < SMP_USER_SLOTS; k++)
             smp_user_scan(k);
     }
+#if FELUCCA_SLICE
+    slc_store_load();                              /* (after the scans: they clear the MAN slices) */
+#endif
     {
         int n = st_load(OBJ_SETTINGS, &p, sizeof p);
         if (n == (int)sizeof p && p.magic == PERSIST_MAGIC) {

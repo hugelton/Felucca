@@ -28,6 +28,7 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)
         nor[off + i] &= s[i];
     return 0;
 }
+#define FELUCCA_SLICE 1                                  /* the full map, with SLICE's object */
 #include "../firmware/src/storage.c"
 
 static int check(const char *what, int ok)
@@ -89,7 +90,27 @@ int main(void)
     bad += check("both headers broken -> nothing", st_load(OBJ_PROJECT0 + 2, got, sizeof got) < 0);
     bad += check("data stays in the Felucca regions",
                  st_sector(OBJ_SETTINGS, 1) + 4096 <= 0xFF000 && st_sector(OBJ_PROJECT0 + 3, 1) + 4096 <= 0xE0000 &&
-                     st_sector(OBJ_UPRESET0, 0) >= 0xDC000 && st_sector(OBJ_COUNT - 1, 1) + 4096 <= 0xE0000);
+                     st_sector(OBJ_UPRESET0, 0) >= 0xDC000 && st_sector(OBJ_UPRESET0 + 1, 1) + 4096 <= 0xE0000);
+    {   /* every copy of every object: its own sector, inside FL_DATA or FL_GLOB, off the sample slots */
+        uint32_t o, c, o2, c2, ok = 1;
+        for (o = 0; o < OBJ_COUNT; o++)
+            for (c = 0; c < 2u; c++) {
+                uint32_t s = st_sector(o, c);
+                ok &= ((s >= 0x97000u && s + 4096u <= 0xE0000u) || (s >= 0xFC000u && s + 4096u <= 0xFF000u)) &&
+                      !(s >= 0xA0000u && s < 0xDC000u) && !(s & 0xFFFu);
+                for (o2 = 0; o2 < OBJ_COUNT; o2++)
+                    for (c2 = 0; c2 < 2u; c2++)
+                        ok &= (o2 == o && c2 == c) || st_sector(o2, c2) != s;
+            }
+        bad += check("every object copy: its own sector in a Felucca region (with SLICE's)", ok);
+    }
+    {
+        uint8_t m[700], g[700];
+        memset(m, 0x5A, sizeof m);
+        bad += check("SLICE object: save, save again, load",
+                     st_save(OBJ_SLICE, m, sizeof m) == 0 && (m[3] = 7, st_save(OBJ_SLICE, m, sizeof m)) == 0 &&
+                         st_load(OBJ_SLICE, g, sizeof g) == (int)sizeof m && !memcmp(g, m, sizeof m));
+    }
     printf("%s\n", bad ? "STORAGE TEST FAILED" : "storage test passed");
     return bad != 0;
 }

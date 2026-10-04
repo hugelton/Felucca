@@ -17,8 +17,13 @@
 #define ST_PAYLOAD_MAX (ST_SECTOR - ST_PAYLOAD_OFF)
 
 /* flash map (FL_DATA 0x97000..0xDFFFF, FL_GLOB 0xFC000..): settings 0xFC000, projects 0x97000..0x9EFFF,
- * user sample slots 0xA0000..0xDBFFF (eng_sample.c), user preset banks 0xDC000..0xDFFFF (upreset.c) */
+ * user sample slots 0xA0000..0xDBFFF (eng_sample.c), user preset banks 0xDC000..0xDFFFF (upreset.c);
+ * FELUCCA_SLICE: SLICE's MAN slices in the two sectors left over, 0x9F000 (A) and 0xFE000 (B) */
+#if FELUCCA_SLICE
+enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_SLICE = OBJ_UPRESET0 + 2, OBJ_COUNT };
+#else
 enum { OBJ_SETTINGS, OBJ_PROJECT0, OBJ_UPRESET0 = OBJ_PROJECT0 + 4, OBJ_COUNT = OBJ_UPRESET0 + 2 };
+#endif
 
 typedef struct {
     uint32_t magic;
@@ -50,6 +55,10 @@ static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy 
 {
     if (obj == OBJ_SETTINGS)
         return 0xFC000u + copy * ST_SECTOR;
+#if FELUCCA_SLICE
+    if (obj == OBJ_SLICE)
+        return copy ? 0xFE000u : 0x9F000u;
+#endif
     if (obj >= OBJ_UPRESET0)
         return 0xDC000u + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
     return 0x97000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;

@@ -445,6 +445,53 @@ int main(int argc, char **argv)
         m = slc_man_begin(2);                                  /* USR2 is empty: nothing to edit */
         ok &= m->n == 0u && slc_man_split(slc_get(0), m, 0) == 0u && m->n == 0u;
         check("MAN: edits stack, a slot scan clears them, an empty slot has none", ok, 0);
+
+        {   /* what project.c stores and restores (OBJ_SLICE): the starts, the end, the material */
+            static uint32_t pos[SLC_AUTO], bad_pos[SLC_AUTO];
+            slc_man_t keep;
+            uint32_t len, crc, n, end, k;
+            const smp_user_hdr_t *h = (const smp_user_hdr_t *)smp_user_xip(0);
+            ok = 1;
+            s = slc_get(1);
+            m = slc_man_begin(1);                          /* a table with every kind of edit */
+            slc_man_move(s, m, 0, 300);
+            slc_man_split(s, m, 2);
+            slc_man_move_end(s, m, 4, -150);
+            slc_man_move_end(s, m, m->n - 1u, -2000);
+            slc_man_commit(1);
+            keep = *slc_man_of(s);
+            n = keep.n;
+            end = keep.end;
+            memcpy(pos, keep.pos, sizeof pos);
+            slc_man_ident(1, &len, &crc);
+            ok &= len == s->len && crc == h->crc && crc != 0u;
+            slc_man_ident(0, &len, &crc);
+            ok &= len == slc_get(0)->len && crc == 0u;
+            smp_user_scan(0);                              /* as at boot: the scan clears them */
+            s = slc_get(1);
+            ok &= !slc_man_of(s);
+            ok &= slc_man_restore(1, n, end, pos) == 0;
+            ok &= slc_man_of(s) && slc_man_of(s)->n == keep.n && slc_man_of(s)->end == keep.end &&
+                  !memcmp(slc_man_of(s)->pos, keep.pos, n * 4u) && !memcmp(slc_man_of(s)->st, keep.st, n * 4u);
+            check("MAN store: the material's identity; restored == saved (starts, end, states)", ok && !man_check(s, slc_man_of(s)), 0);
+
+            ok = 1;
+            memcpy(bad_pos, pos, sizeof bad_pos);
+            bad_pos[3] = bad_pos[2] + SLC_MIN - 1u;        /* too close */
+            ok &= slc_man_restore(1, n, end, bad_pos) < 0;
+            memcpy(bad_pos, pos, sizeof bad_pos);
+            k = bad_pos[3], bad_pos[3] = bad_pos[4], bad_pos[4] = k;   /* out of order */
+            ok &= slc_man_restore(1, n, end, bad_pos) < 0;
+            memcpy(bad_pos, pos, sizeof bad_pos);
+            bad_pos[n - 1u] = 0xFFFFFFF0u;                 /* junk that wraps */
+            ok &= slc_man_restore(1, n, end, bad_pos) < 0;
+            ok &= slc_man_restore(1, n, s->len + 1u, pos) < 0;           /* end past the material */
+            ok &= slc_man_restore(1, n, pos[n - 1u] + SLC_MIN - 1u, pos) < 0;   /* end over the last start */
+            ok &= slc_man_restore(1, SLC_AUTO + 1u, end, pos) < 0 && slc_man_restore(1, 0, end, pos) < 0;
+            ok &= slc_man_restore(2, n, end, pos) < 0;     /* USR2: empty */
+            ok &= slc_man_of(s)->n == keep.n && !memcmp(slc_man_of(s)->pos, keep.pos, n * 4u);   /* untouched */
+            check("MAN store: bad tables are refused and change nothing", ok, 0);
+        }
     }
 
     /* 5 */

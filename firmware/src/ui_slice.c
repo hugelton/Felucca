@@ -13,6 +13,7 @@
 #define SE_W 240u
 #define SE_MID 52                    /* band 1: the waveform's centre row, +-48 */
 static int32_t accel(uint32_t role, int32_t s, int32_t range);   /* ui_input.c */
+static void slc_store_save(void);                                /* project.c */
 static struct {
     uint8_t on, src, sel, zoom;      /* zoom: log2 of x1..x16 */
     uint8_t focus;                   /* the view follows the slice's 0 start (KNOB 1, 2), 1 end (KNOB 3) */
@@ -31,10 +32,11 @@ static int slice_edit_page(void)
            pg->scope == SC_ENGINE && pg->id[0] == P_E0;
 }
 
-static void slice_edit_close(void)
+static void slice_edit_close(void)                  /* the slices go to flash (if they changed) */
 {
     se.on = 0;
     ui.force = 1;
+    slc_store_save();
 }
 
 static void slice_edit_open(void)

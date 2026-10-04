@@ -64,6 +64,7 @@ static int32_t accel(uint32_t role, int32_t s, int32_t range)
     return s;
 }
 #include "../firmware/src/ui_slice.c"
+static void slc_store_save(void) {}                     /* (project.c: no flash here) */
 
 static void shot(const char *dir, const char *name)
 {

@@ -353,6 +353,40 @@ static uint32_t slc_man_split(const slc_src_t *s, slc_man_t *m, uint32_t j)
     return j + 1u;
 }
 
+/* ---- MAN in flash (project.c, OBJ_SLICE): the starts and the end are stored with what they were set
+ * on; the decoder states are decoded again when they are restored */
+/* the material of source src: its length, and for a user slot the CRC of its data (0 = none) */
+static void slc_man_ident(uint32_t src, uint32_t *len, uint32_t *crc)
+{
+    const slc_src_t *s = slc_get(src);
+    *len = s ? s->len : 0u;
+    *crc = s && src ? ((const smp_user_hdr_t *)smp_user_xip(src - 1u))->crc : 0u;
+}
+
+/* put stored slices in use for source src; 0 = done, -1 = they do not fit its material (nothing changes) */
+static int slc_man_restore(uint32_t src, uint32_t n, uint32_t end, const uint32_t *pos)
+{
+    const slc_src_t *s = slc_get(src);
+    slc_man_t *m;
+    uint32_t i, e;
+    if (!s || !n || n > SLC_AUTO || end > s->len)
+        return -1;
+    e = end ? end : s->len;
+    for (i = 0; i < n; i++)                         /* (no sums that can wrap: the data may be junk) */
+        if (pos[i] >= e || e - pos[i] < SLC_MIN || (i && pos[i] - pos[i - 1u] < SLC_MIN) ||
+            (i && pos[i] < pos[i - 1u]))
+            return -1;
+    m = slc_man_begin(src);
+    m->n = n;
+    m->end = end;
+    for (i = 0; i < n; i++) {
+        m->pos[i] = pos[i];
+        m->st[i] = slc_state_at(s, pos[i]);
+    }
+    slc_man_commit(src);
+    return 0;
+}
+
 /* delete the start of slice j (1 .. n - 1): it joins slice j - 1; returns that one */
 static uint32_t slc_man_delete(slc_man_t *m, uint32_t j)
 {
