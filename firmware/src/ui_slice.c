@@ -4,7 +4,8 @@
  * (eng_slice.c slc_man_*). Hold EDIT on SLICE's first EDIT page to open it (DIV becomes MAN);
  * EDIT or HOME closes it. KNOB 1 selects a slice, KNOB 2 moves its start, KNOB 3 its end (the next
  * slice's start; the last slice: where all slices end), a column of the view per detent (finer
- * when zoomed); KNOB 4 zooms (x1..x16, around the selected start). OCT+ splits the slice at its
+ * when zoomed); KNOB 4 zooms (x1..x16). The view follows the start (KNOB 1, 2) or the end (KNOB 3)
+ * of the selected slice, whichever was turned last. OCT+ splits the slice at its
  * middle, OCT- deletes its start (it joins the slice before). The keys play the slices as always
  * (those that play the selected one are lit), PLAY runs the sequencer. The waveform: the smallest
  * and largest sample per column, decoded here in the main loop when the view moves. */
@@ -14,6 +15,7 @@
 static int32_t accel(uint32_t role, int32_t s, int32_t range);   /* ui_input.c */
 static struct {
     uint8_t on, src, sel, zoom;      /* zoom: log2 of x1..x16 */
+    uint8_t focus;                   /* the view follows the slice's 0 start (KNOB 1, 2), 1 end (KNOB 3) */
     uint32_t view, span;             /* the view: first sample, samples */
     uint32_t env_view, env_span, env_len;     /* what lo / hi were decoded for (env_span 0: nothing) */
     uint8_t env_src;
@@ -52,14 +54,16 @@ static void slice_edit_open(void)
     se.src = (uint8_t)src;
     se.sel = 0;
     se.zoom = 0;
+    se.focus = 0;
     se.env_span = 0;
     ui.force = 1;
 }
 
-/* the view: span = len >> zoom, around the selected slice's start */
+/* the view: span = len >> zoom, around the selected slice's start or end (the knob last turned) */
 static void slice_edit_view(const slc_src_t *s, const slc_man_t *m)
 {
-    uint32_t c = m->pos[se.sel < m->n ? se.sel : 0u];
+    uint32_t j = se.sel < m->n ? se.sel : 0u;
+    uint32_t c = !se.focus ? m->pos[j] : j + 1u < m->n ? m->pos[j + 1u] : slc_man_end(s, m);
     se.span = s->len >> se.zoom;
     se.view = c > se.span / 2u ? c - se.span / 2u : 0u;
     if (se.view + se.span > s->len)
@@ -78,27 +82,33 @@ static void slice_edit_input(uint32_t pressed)
     }
     if ((pressed >> panel.btn[B_PLAY]) & 1u)
         transport_req = song.playing ? 2 : 1;
-    if ((d = panel_enc(EN_K1)) != 0)
+    if ((d = panel_enc(EN_K1)) != 0) {
         se.sel = (uint8_t)clamp((int32_t)se.sel + d, 0, (int32_t)cur->n - 1);
+        se.focus = 0;
+    }
     if ((d = panel_enc(EN_K4)) != 0)
         se.zoom = (uint8_t)clamp((int32_t)se.zoom + d, 0, 4);
     slice_edit_view(s, cur);
     col = (int32_t)(se.span / SE_W ? se.span / SE_W : 1u);
     if ((d = panel_enc(EN_K2)) != 0) {                  /* the start, a column of the view per detent */
+        se.focus = 0;
         m = slc_man_begin(se.src);
         slc_man_move(s, m, se.sel, accel(EN_K2, d, 1000) * col);
         slc_man_commit(se.src);
     } else if ((d = panel_enc(EN_K3)) != 0) {           /* the end (the next slice's start) */
+        se.focus = 1;
         m = slc_man_begin(se.src);
         slc_man_move_end(s, m, se.sel, accel(EN_K3, d, 1000) * col);
         slc_man_commit(se.src);
     } else if ((pressed >> panel.btn[B_OCTUP]) & 1u) {
         m = slc_man_begin(se.src);
         se.sel = (uint8_t)slc_man_split(s, m, se.sel);
+        se.focus = 0;
         slc_man_commit(se.src);
     } else if ((pressed >> panel.btn[B_OCTDN]) & 1u && se.sel) {
         m = slc_man_begin(se.src);
         se.sel = (uint8_t)slc_man_delete(m, se.sel);
+        se.focus = 0;
         slc_man_commit(se.src);
     }
     enc_drop();                                     /* SELECT, ALGORITHM, PRESETS: not here */
@@ -199,8 +209,11 @@ static void draw_slice_edit(void)
                 if (x >= 0 && x < (int32_t)SE_W)
                     cv_line(x, SE_MID - 50, x, SE_MID + 50, i == se.sel ? C_WHITE : C_AMB);
             }
-            cv_rect(0, 110, 240, 4, C_DIM);
-            cv_rect((int32_t)(se.view * SE_W / s->len), 110, (int32_t)(se.span * SE_W / s->len) | 1, 4, C_GRAY);
+            {                                           /* the whole: a thin line; the view on it: a block */
+                int32_t vw = (int32_t)(se.span * SE_W / s->len);
+                cv_rect(0, 112, 240, 2, C_DIM);
+                cv_rect((int32_t)(se.view * SE_W / s->len), 109, vw < 3 ? 3 : vw, 8, C_HI);
+            }
         }
         {   /* the selected slice in numbers, the controls */
             int32_t y = 124 + 6;
