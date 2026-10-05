@@ -105,6 +105,18 @@ static void ui_leds(void)
     if (!ui.layer && !ui.menu && !name_on() && slice_page_on())
         c |= slice_leds();                              /* SLICES: and the keys of the selected slice */
 #endif
+    if (!ui.layer && !ui.menu && !name_on() && !grid_on() && song.g[G_NOTELIT]) {
+        const track_t *t = TSEL;
+        for (k = 0; k < NVOICE; k++) {
+            const voice_t *v = &t->v[k];
+            if (v->active && v->gate && v->stage <= 2) {
+                uint32_t ki, note = v->note;
+                for (ki = 0; ki < 27u; ki++)
+                    if (kb_map(t, ki) == note)
+                        c |= 1u << ki;
+            }
+        }
+    }
     for (k = 0; k < 27u; k++)
         led_put(nl, 14u + k, (int)((c >> k) & 1u));
     for (c = 0; c < FM1_NCOL; c++)
