@@ -648,6 +648,35 @@ async function editorGrid() {
   done();
 }
 
+/* RATCH: a step's ratchet (1..4) after its chance, INFO 52 01 04; older firmware (no tag): none, replies read x1 */
+async function editorRatchet() {
+  const C = E.CMD;
+  const { rq, done } = attachMock({});
+  const info = E.parse[C.INFO](await rq(E.req.info()));
+  let s = E.parse[C.STEP_SET](await rq(E.req.stepSet(6, { n: 1, notes: [60, 0, 0, 0], time: 0, flags: 1, vel: 100, chance: 70, ratchet: 3 })));
+  ok(info.ratchet === 4 && s.ratchet === 3 && s.chance === 70 && s.flags === 1, "ratchet: INFO 52 01 04, STEP_SET x3 after the chance");
+  s = E.parse[C.STEP_SET](await rq(E.req.stepSet(6, { n: 1, notes: [62, 0, 0, 0], time: 0, flags: 0, vel: 100, chance: 70 })));
+  ok(s.ratchet === 3 && s.notes[0] === 62, "ratchet: a STEP_SET without it (an older editor) keeps the step's");
+  ok(E.req.stepSet(6, { n: 1, notes: [60, 0, 0, 0], time: 0, flags: 0, vel: 100, ratchet: 2 })[1].length === 9,
+    "ratchet: never sent without the chance before it");
+  const w = E.parse[C.TRACK_STEP](await rq(E.req.trackStep(1, 2, { n: 1, notes: [50, 0, 0, 0], time: 0, flags: 0, vel: 90, chance: 100, ratchet: 4 })));
+  ok(w.ratchet === 4 && E.parse[C.TRACK_STEP](await rq(E.req.trackStep(1, 2))).ratchet === 4, "ratchet: TRACK_STEP x4 on another track");
+  const fw = E.parse[C.INFO]([88, 0, 0, 91, 27, 64, 83, 4, 16, 0x55, 1, 9, 0x4d, 1, 64, 1, 0x42, 1, 3, 0x46, 1, 8, 27, 0x53, 1, 3, 0x52, 1, 4]);
+  const old = E.parse[C.INFO]([88, 0, 0, 91, 27, 64, 83, 4, 16, 0x55, 1, 9, 0x4d, 1, 64, 1, 0x42, 1, 3, 0x46, 1, 8, 27, 0x53, 1, 3]);
+  ok(fw.ratchet === 4 && fw.syncCaps === 3 && old.ratchet === 0 && E.parse[C.STEP_GET]([1, 1, 60, 0, 0, 0, 0, 0, 96, 0, 0, 0, 100]).ratchet === 1,
+    "ratchet: the firmware's INFO trailer; 1.0's has none and its steps read x1");
+  const steps = E.stepsFromPattern([[60, 1 | 2 << 3], [0, 4], [62, 3 << 3], ...Array(13).fill([0, 0])]);
+  ok(steps[0].ratchet === 3 && steps[0].flags === 1 && steps[2].ratchet === 4 && steps[1].time === 1 &&
+     JSON.stringify(E.patternFromSteps(steps).slice(0, 3)) === JSON.stringify([[60, 17], [0, 4], [62, 24]]),
+     "ratchet: a user preset's pattern keeps it in its flags (8 | 16)");
+  done();
+  const o = attachMock({ noSync: true });
+  const oi = E.parse[C.INFO](await o.rq(E.req.info()));
+  s = E.parse[C.STEP_GET](await o.rq(E.req.stepGet(0)));
+  ok(oi.ratchet === 0 && s.ratchet === 1 && s.chance === 100, "ratchet: firmware without it: no tag, steps x1");
+  o.done();
+}
+
 async function editorLive() {
   const C = E.CMD;
   const { m, link, rq, sent, ev, done } = attachMock({ watchMs: 250 });
@@ -1390,6 +1419,7 @@ await editorSamplePresets();
 mockTables();
 await editorLibrarian();
 await editorGrid();
+await editorRatchet();
 await editorLive();
 await preferenceReplies();
 await editorTracks();

@@ -112,15 +112,16 @@ static int preferences(void)
     uint32_t n = request(ED_INFO, a, 0);
     bad += check("INFO explicitly tags display capabilities after SONG without changing command 33",
         ED_SONG == 33 && ED_UI_STATE == 34 && ED_FAV_SET == 38 &&
-        host_wire[n - 22] == CHAIN_ROWS && host_wire[n - 21] == 0x55 &&
-        host_wire[n - 20] == 1 && host_wire[n - 19] == 9 &&
-        host_wire[n - 18] == 0x4d && host_wire[n - 17] == 1 &&
-        host_wire[n - 16] == MOTION_MAX && host_wire[n - 15] == 1 &&
-        host_wire[n - 14] == 0x42 && host_wire[n - 13] == 1 && host_wire[n - 12] == 3 &&
-        host_wire[n - 11] == 0x46 && host_wire[n - 10] == 1 && host_wire[n - 9] == FM6_NFACTORY &&
-        host_wire[n - 8] == 0 &&                         /* (no bank since 1.0.3) */
-        host_wire[n - 7] == 0x53 && host_wire[n - 6] == 1 && host_wire[n - 5] == 3 &&
-        host_wire[n - 4] == 0x50 && host_wire[n - 3] == 1 && host_wire[n - 2] == 3);   /* FM6 v2: no bank, preset patches */
+        host_wire[n - 25] == CHAIN_ROWS && host_wire[n - 24] == 0x55 &&
+        host_wire[n - 23] == 1 && host_wire[n - 22] == 9 &&
+        host_wire[n - 21] == 0x4d && host_wire[n - 20] == 1 &&
+        host_wire[n - 19] == MOTION_MAX && host_wire[n - 18] == 1 &&
+        host_wire[n - 17] == 0x42 && host_wire[n - 16] == 1 && host_wire[n - 15] == 3 &&
+        host_wire[n - 14] == 0x46 && host_wire[n - 13] == 1 && host_wire[n - 12] == FM6_NFACTORY &&
+        host_wire[n - 11] == 0 &&                         /* (no bank since 1.0.3) */
+        host_wire[n - 10] == 0x53 && host_wire[n - 9] == 1 && host_wire[n - 8] == 3 &&
+        host_wire[n - 7] == 0x50 && host_wire[n - 6] == 1 && host_wire[n - 5] == 3 &&   /* FM6 v2: no bank, preset patches */
+        host_wire[n - 4] == 0x52 && host_wire[n - 3] == 1 && host_wire[n - 2] == 4);   /* RATCH */
     request(ED_UI_SET, a, 2);
     bad += check("UI_SET updates the actual palette and reports RAM-only saving",
         host_wire[5] == 3 && settings.palette == 7 && T_BG == UI_PALETTES[7].bg);
@@ -234,22 +235,45 @@ static int steps(void)
     reset();
     TSEL->step[0].hit = TSEL->step[0].acc = 0x80;
     bad += check("legacy 8-byte step writes preserve lane data",
-                 request(ED_STEP_SET, a, 9) == 19u && TSEL->step[0].note[0] == 60 &&
+                 request(ED_STEP_SET, a, 9) == 20u && TSEL->step[0].note[0] == 60 &&
                  TSEL->step[0].hit == 0x80 && TSEL->step[0].acc == 0x80);
     bad += check("full grid step writes preserve high lane bits and constrain accents",
-                 request(ED_STEP_SET, a, 12) == 19u && TSEL->step[0].hit == 0x92 && TSEL->step[0].acc == 2);
+                 request(ED_STEP_SET, a, 12) == 20u && TSEL->step[0].hit == 0x92 && TSEL->step[0].acc == 2);
     before = TSEL->step[0]; a[2] = 71;
     for (n = 2; n <= sizeof a; n++) {
-        if (n == 9u || n == 12u || n == 13u) continue;
+        if (n == 9u || n == 12u || n == 13u) continue;   /* (14: a[13], the ratchet, 0 is refused) */
         ok &= !request(ED_STEP_SET, a, n) && !memcmp(&before, &TSEL->step[0], sizeof before);
     }
     bad += check("partial or oversized step payloads never mutate a valid step", ok);
     a[0] = 1; a[1] = 0; memcpy(a + 2, (const uint8_t[]){1,64,0,0,0,ST_NOTE,0,99}, 8);
     bad += check("TRACK_STEP accepts its legacy payload on an unselected track",
-                 request(ED_TRACK_STEP, a, 10) == 20u && trk[1].step[0].note[0] == 64 && song.sel == 0);
+                 request(ED_TRACK_STEP, a, 10) == 21u && trk[1].step[0].note[0] == 64 && song.sel == 0);
     before = trk[1].step[0]; a[3] = 65;
     bad += check("TRACK_STEP rejects an incomplete grid extension",
                  !request(ED_TRACK_STEP, a, 11) && !memcmp(&before, &trk[1].step[0], sizeof before));
+    /* RATCH (INFO 52 01 04): the hits 1..4 after the chance; the flags byte stays accent | slide both ways */
+    memcpy(a, (const uint8_t[]){0, 1, 60, 0, 0, 0, ST_NOTE, SF_ACCENT, 100, 0, 0, 0, 80, 3}, 14);
+    n = request(ED_STEP_SET, a, 14);
+    bad += check("STEP_SET with the ratchet: x3 kept, replied after the chance, flags without it",
+                 n == 20u && step_ratchet(&TSEL->step[0]) == 3u && step_chance(&TSEL->step[0]) == 80u &&
+                 host_wire[n - 2] == 3 && host_wire[n - 3] == 80 && host_wire[12] == SF_ACCENT);
+    a[7] = SF_SLIDE; n = request(ED_STEP_SET, a, 13);
+    ok = n == 20u && step_ratchet(&TSEL->step[0]) == 3u && TSEL->step[0].flags == (SF_SLIDE | 2u << SF_RATCH_SH);
+    n = request(ED_STEP_SET, a, 9);
+    bad += check("STEP_SET without the ratchet (an older editor) keeps the step's own",
+                 ok && n == 20u && step_ratchet(&TSEL->step[0]) == 3u);
+    before = TSEL->step[0]; ok = 1;
+    for (n = 0; n < 8u; n++) {
+        a[13] = (uint8_t)(n < 4u ? 0u : 5u + n);
+        ok &= !request(ED_STEP_SET, a, 14) && !memcmp(&before, &TSEL->step[0], sizeof before);
+    }
+    bad += check("STEP_SET refuses a ratchet outside 1..4 and leaves the step", ok);
+    memcpy(a, (const uint8_t[]){1, 2, 1, 64, 0, 0, 0, ST_NOTE, 0, 99, 0, 0, 0, 100, 4}, 15);
+    n = request(ED_TRACK_STEP, a, 15);
+    ok = n == 21u && step_ratchet(&trk[1].step[2]) == 4u && host_wire[n - 2] == 4;
+    a[14] = 1; n = request(ED_TRACK_STEP, a, 15);
+    bad += check("TRACK_STEP sets the ratchet of any track (x4, then back to x1)",
+                 ok && n == 21u && step_ratchet(&trk[1].step[2]) == 1u && !(trk[1].step[2].flags & SF_RATCH));
     return bad;
 }
 

@@ -25,10 +25,10 @@ Multi-engine synthesizer firmware for the M-VAVE FM-1. Please report what you fi
 - **Thirteen engines** (below), each with its own factory presets
 - **Four tracks**, one synth part each with its own engine and sound (drums are the DRUM engine);
   8 voices shared between them. ALGORITHM selects the track on every page
-- **Sequencer:** 64 steps per track with chords, ties, accent, slide and per-step chance; a piano
-  roll of the steps; a drum grid (white keys = steps, black keys = lanes); motion recording of knob
-  moves (a motion icon marks the cards it drives); live loop recording with overdub; divisions listed
-  by length, 4 bars to 1/32; loading a sound never touches your patterns
+- **Sequencer:** 64 steps per track with chords, ties, accent, slide, per-step chance and ratchet
+  (x1..x4); a piano roll of the steps; a drum grid (white keys = steps, black keys = lanes); motion
+  recording of knob moves (a motion icon marks the cards it drives); live loop recording with overdub;
+  divisions listed by length, 4 bars to 1/32; loading a sound never touches your patterns
 - **Songs:** chain patterns A–D
 - **Chord keys:** one finger plays an in-key chord (triads or sevenths of the scale, or fixed chord
   shapes), with voicings; on the keys, MIDI in, recording and the arpeggiator

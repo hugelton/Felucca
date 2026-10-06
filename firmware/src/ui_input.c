@@ -406,10 +406,13 @@ static void edit_param(uint32_t slot, int32_t steps)
     int32_t v;
     if (pg->graph == GR_CHANCE) {
         if (slot == 0u) cursor_set(ui.cursor + steps);
-        else if (slot == 1u) {
+        else if (slot == 1u || slot == 2u) {
             if (chain_busy()) { ui_message("STOP TO EDIT"); return; }
             step_t *st = &TSEL->step[ui.cursor];
-            step_set_chance(st, (uint32_t)clamp((int32_t)step_chance(st) + steps, 0, 100));
+            if (slot == 1u)
+                step_set_chance(st, (uint32_t)clamp((int32_t)step_chance(st) + steps, 0, 100));
+            else                                      /* RATCH x1..x4 */
+                step_set_ratchet(st, (uint32_t)clamp((int32_t)step_ratchet(st) + steps, 1, 4));
         }
         return;
     }

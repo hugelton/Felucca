@@ -28,6 +28,9 @@ restore the whole device. P_COUNT is 89 and P_E0 is 81: twenty FM operator param
 before the engine parameters, which moved from 61..68 to 81..88. Always take P_E0 from `INFO`. INFO ends with
 tagged capability blocks for these (see `INFO`).
 
+**Ratchet (INFO `52 01 04`):** a step gets a ratchet byte (its hits, 1..4) after its chance: one more byte at
+the end of the step replies, and an optional last byte of a step write (see "Ratchet" below). Nothing else changed.
+
 **Chord keys (91 parameters, 1.0):** two track parameters, `CHRD` (81) and `VOIC` (82), went in before the
 engine parameters, which moved from 81..88 to 83..90: P_COUNT 91, P_E0 83. No command changed; an editor that
 takes P_COUNT and P_E0 from `INFO` keeps working (see "The chord keys" below).
@@ -43,8 +46,8 @@ Every valid request gets exactly one reply, with the same header and the same `<
 Unknown commands and invalid fixed argument lengths get no reply; argument errors
 follow the command-specific rules below.
 Fixed-size commands require exactly the lengths in the tables; step writes accept the
-8-byte legacy step, the 11-byte grid step or the 12-byte step with its chance (a chance above 100 gets
-no reply). Every data byte is 7 bit.
+8-byte legacy step, the 11-byte grid step, the 12-byte step with its chance (a chance above 100 gets
+no reply) or the 13-byte step with its ratchet (a ratchet outside 1..4 gets no reply). Every data byte is 7 bit.
 MIDI realtime bytes may occur inside SysEx; another status aborts the partial frame. While the editor
 watches (v2, `WATCH`), the device also sends push frames (cmds 23, 24, 26) at any time.
 
@@ -123,13 +126,13 @@ global `G_CLOCK` (id 2, label "CLK") 3 (INT, USB, TRS). `G_MIDI` (id 12) is an e
 
 | cmd | Request args | Reply args |
 | --- | --- | --- |
-| 1 INFO | — | version string, NENGINES, P_COUNT, G_COUNT, NSTEP, P_E0, then NENGINES engine-name strings, then (v3) NTRK (4), then (v6) CHAIN_ROWS (16), then the tagged blocks `55 01 uiCaps`, `4D 01 64 01`, `42 01 3`, `46 01 nfactory nbank` and `53 01 3` (below); older firmware ends earlier |
+| 1 INFO | — | version string, NENGINES, P_COUNT, G_COUNT, NSTEP, P_E0, then NENGINES engine-name strings, then (v3) NTRK (4), then (v6) CHAIN_ROWS (16), then the tagged blocks `55 01 uiCaps`, `4D 01 64 01`, `42 01 3`, `46 01 nfactory nbank`, `53 01 3` and `52 01 4` (below); older firmware ends earlier |
 | 2 GET | scope, id | scope, id, v14 |
 | 3 SET | scope, id, v14 | scope, id, v14 (the value after clamping). Setting global `G_ENGSEL` (id from DESC label "ENG") changes the engine: its defaults, then its first preset (as on the device) |
 | 4 DUMP | — | engine, preset, then P_COUNT × v14 (the selected track), then G_COUNT × v14 (globals) |
 | 5 DESC | scope, id | scope, id, fmt, min v14, max v14, def v14, label string, unit string, then for an enum (fmt 8) one name string per value (at most 24; firmware before the matrix: at most 16) |
-| 6 STEP_GET | index 0..NSTEP−1 | index, n (0..4 notes), note0..note3, time (0 NOTE, 1 TIE, 2 REST), flags (1 accent, 2 slide), vel, then (v5) hits (3 bytes, below), then (v7) chance 0..100 |
-| 7 STEP_SET | index, n, note0..3, time, flags, vel [, hits (3 bytes, v5) [, chance 0..100 (v7)]] | same as STEP_GET (after the write). Without the hits the step keeps its own; without the chance it keeps its own. The chance can only follow the hits |
+| 6 STEP_GET | index 0..NSTEP−1 | index, n (0..4 notes), note0..note3, time (0 NOTE, 1 TIE, 2 REST), flags (1 accent, 2 slide), vel, then (v5) hits (3 bytes, below), then (v7) chance 0..100, then (`52 01`) ratchet 1..4 |
+| 7 STEP_SET | index, n, note0..3, time, flags, vel [, hits (3 bytes, v5) [, chance 0..100 (v7) [, ratchet 1..4]]] | same as STEP_GET (after the write). Without the hits the step keeps its own; without the chance or the ratchet it keeps its own. The chance can only follow the hits, the ratchet the chance |
 | 8 PRESET | engine, preset | engine, preset (applies the preset's sound to the selected track and sends; the steps and the track's own parameters stay, see "Sound loads and undo"). For another track, select it with `TRACK` first |
 | 9 PROJECT | op (0 load, 1 save, 2 query), slot 0..3 | op, slot, used (1/0). Save writes flash: allow ~2 s; it stops the transport first (see "Saves while playing") |
 | 10 NAMES | engine | engine, count, count preset-name strings, then the two edit-page titles |
@@ -155,7 +158,7 @@ global `G_CLOCK` (id 2, label "CLK") 3 (INT, USB, TRS). `G_MIDI` (id 12) is an e
 | 27 TRACK | — (query), or track (select it) | selected track, NTRK, then per track: engine byte, preset, level v14, mute (0/1), armed (0/1, live recording) |
 | 28 TRACK_MIX | track (get), or track, level v14 (0..127), mute (set) | track, level v14, mute: the track's `P_LEVEL` and `P_MUTE` |
 | 29 TRACK_DUMP | track | track, engine byte, preset, P_COUNT × v14 (that track's parameters; no globals) |
-| 30 TRACK_STEP | track, index (get), or track, index, n, note0..3, time, flags, vel [, hits (v5) [, chance (v7)]] (set) | track, index, n, note0..3, time, flags, vel, then (v5) hits, then (v7) chance |
+| 30 TRACK_STEP | track, index (get), or track, index, n, note0..3, time, flags, vel [, hits (v5) [, chance (v7) [, ratchet]]] (set) | track, index, n, note0..3, time, flags, vel, then (v5) hits, then (v7) chance, then (`52 01`) ratchet |
 
 | cmd (v4) | Request args | Reply args |
 | --- | --- | --- |
@@ -212,7 +215,8 @@ is not required.
 
 A user preset = engine (0..NENGINES−1), name (1..12 chars, ASCII 32..126; the device shows it upper
 case), all P_COUNT instrument parameters (v14 each, the same order as `DUMP`), and a 16-step pattern:
-16 × (note 0..127 (0 = rest), flags: 1 accent, 2 slide, 4 tie). Loading one applies the engine and
+16 × (note 0..127 (0 = rest), flags: 1 accent, 2 slide, 4 tie, 8 | 16 the ratchet − 1 (firmware with `52 01`;
+before, 0: x1, and such firmware drops those bits when it loads the pattern)). Loading one applies the engine and
 the parameters of the sound, as a factory preset (the track's own parameters, the steps and LEN stay; see
 "Sound loads and undo"). The stored pattern is kept and returned by `UP_GET`; on the device SEQ > PHRASES
 lists it as "U07" and loads it, with the stored LEN (at most 16), DIV, SWING and GATE. The slots are
@@ -480,7 +484,8 @@ when the track's engine is not the saved one).
 - **Projects (FUN7).** 3388 bytes, little endian, in the same A/B sectors as before: `46 55 4E 37` ("FUN7"),
   size u32 (3388), the 27 globals as i16 (bytes 8..61), sel, parts, phys (62..64), P_COUNT as stored (byte 66),
   then from byte 68 for each of the 4 tracks: P_COUNT bytes (value + 64), engine, preset, 64 steps of 9 bytes
-  (4 notes; n | time << 3 | flags << 5; vel; hit; acc; chance byte where 0 = 100 %, 1..100, 101 = never);
+  (4 notes; n | time << 3 | flags << 5; vel; hit; acc; chance byte where 0 = 100 %, 1..100, 101 = never; firmware
+  with `52 01`: the ratchet − 1 in bit 7 of vel (bit 0) and of the chance byte (bit 1), see "Ratchet");
   then the song chain, then the motion (260 bytes: count, on mask, 2 reserved, 64 × (track << 6 | step, id,
   i16 value)); the reserved tail is zero up to byte 3371; bytes 3372..3383 are the project's name (since
   1.0: ASCII 32..126, upper case, 0-padded; all zero = no name, as firmware before wrote them; a byte
@@ -500,6 +505,24 @@ when the track's engine is not the saved one).
   without a pulse stops the transport. Changing `G_CLOCK` stops it.
 - Pitch bend, sustain (CC64), RPN 0 (bend range, ±0..24 semitones), CC120 / 121 / 123 are MIDI only and
   have no parameters, protocol or saved state.
+
+## Ratchet
+
+INFO advertises `52 01 4` after the live sync tag: a step plays up to 4 times. Firmware without the tag has no
+ratchet byte (read every step as 1).
+
+- A NOTE step's ratchet 2..4 plays all of it (its notes and its drum hits) that many times, in equal parts of the
+  step as swung, each part retriggered and held for GATE of the part. The chance is rolled once for the step (a
+  failed roll: no part). A slide into it glides into the first part; it never slides or ties into the next step. 1
+  (the default, what every older pattern holds) is the step as before. TIE and REST steps ignore it.
+- `STEP_GET` / `STEP_SET` / `TRACK_STEP`: the byte after the chance, 1..4. The flags byte stays 1 accent, 2 slide in
+  both directions; a write without the ratchet byte (an older editor) keeps the step's ratchet.
+- On the device: SEQ > CHANCE, KNOB 3 (RATCH x1..x4) of the cursor step; the piano roll and the DRUM grid draw a
+  ratcheted step in its parts. Changing it pushes `STEP_CHANGED`.
+- Saved in projects (FUN7 / FUN8 layout unchanged: bit 7 of the velocity byte is the ratchet − 1's bit 0, bit 7 of
+  the chance byte its bit 1; 0 in every older project, which load x1), so also in backups and song rows. Firmware
+  before the ratchet refuses a project that holds one. A user preset's note pattern keeps it in its flags (8 | 16);
+  a drum grid record has no room for it and loads x1.
 
 ## v7: full backup (65-67)
 
