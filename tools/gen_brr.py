@@ -18,8 +18,10 @@ A recording becomes an instrument the way SNES composers made them: its onset fo
 near the bank's so that a whole number of cycles fills a whole number of BRR blocks (the loop then has no
 seam in pitch), the loop placed after the attack where the wave best meets itself one loop later, its decay
 (struck notes) flattened across the loop and its end crossfaded into its start; then encoded. The root: the
-note that plays at pitch 0x1000 (the stored rate scaled to the chip's 32 kHz). Recordings: build/genwav
-(tools/gen_waves.py's drums, made by gen_samples.py, which tools/build.py runs first).
+note that plays at pitch 0x1000 (the stored rate scaled to the chip's 32 kHz). Recordings: assets/snes-cc0
+(tools/fetch_snes_cc0.py, its notes and tuning measured there once: a build measures nothing; a missing one gets
+a synthesized stand-in), assets/samples-cc0, build/genwav (tools/gen_waves.py's drums, made by gen_samples.py,
+which tools/build.py runs first).
 
 Results are cached in build/brr_cache (keyed by the instrument and its recording): rebuilds are quick.
 """
@@ -37,6 +39,7 @@ import sampleio as sio  # noqa: E402
 import snes_bank as bank  # noqa: E402
 
 SRC = Path(__file__).resolve().parents[1]
+CC0 = SRC / "assets" / "snes-cc0"
 GENWAV = SRC / "build" / "genwav"
 CACHE = SRC / "build" / "brr_cache"
 FS = 32000                                   # the S-DSP's rate: pitch 0x1000 plays a sample as stored
@@ -279,9 +282,21 @@ def root_of_cycle(cycle):
 
 
 # ------------------------------------------------------------ recordings ---
-def recording(inst):
+def recording(inst, manifest):
     """(samples, rate, note, cents) of an instrument's recording, or None (missing)"""
     src = inst["src"]
+    if src[0] == "cc0":
+        m = manifest.get(inst["name"])
+        if not m or not (CC0 / m["file"]).exists():
+            return None
+        sr, x = read_wav(CC0 / m["file"])
+        return x, sr, m["note"], m.get("cents", 0)
+    if src[0] == "asset":
+        p = SRC / "assets" / "samples-cc0" / src[1]
+        if not p.exists():
+            return None
+        sr, x = read_wav(p)
+        return x, sr, src[2], src[3] if len(src) > 3 else 0
     if src[0] == "genwav":
         p = GENWAV / (src[1] + ".wav")
         if not p.exists():                              # (made by gen_samples.py, which build.py runs first)
@@ -291,17 +306,17 @@ def recording(inst):
     return None
 
 
-def build(inst, drum):
+def build(inst, manifest, drum):
     """(BRR bytes, loop byte offset or None, root16, info)"""
     if inst["src"][0] == "synth":
         x, loop, root, rate = synth(inst["src"][1], inst)
         b, rms = brr_encode(x, loop)
         return b, (loop // 16 * 9 if loop is not None else None), root, f"synth {inst['src'][1]}", rms
-    rec = recording(inst)
+    rec = recording(inst, manifest)
     if rec is None:                                     # stand-in: a plucked or held tone
         stand = dict(inst, src=("synth", "sine"))
-        b, lp, root, info, rms = build(stand, drum)
-        return b, lp, root, "stand-in (no recording)", rms
+        b, lp, root, info, rms = build(stand, manifest, drum)
+        return b, lp, root, "stand-in (no recording: tools/fetch_snes_cc0.py)", rms
     x, sr, note, cents = rec
     x = x[max(0, sio.onset(x) - int(0.002 * sr)):]
     kind, rate0 = inst["kind"], inst["rate"]
@@ -320,7 +335,8 @@ def build(inst, drum):
         rate, length = rate0, max(64, int(round(inst["loop"] * rate0 / 16)) * 16)
         period, root = 64, round(16 * (60 + 12 * math.log2(FS / rate)))
     else:
-        f0 = note_hz(note) * 2 ** (cents / 1200)         # (the recording's, as given: a build measures nothing)
+        f0 = note_hz(note) * 2 ** (cents / 1200)         # (measured once, by fetch_snes_cc0.py: a build measures
+        #                                                 nothing, so it is the same with or without numpy)
         rate, length, k = plan_loop(f0, rate0, inst["loop"])
         period = rate / f0
         root = round(16 * (69 + 12 * math.log2(f0 * FS / rate / 440.0)))
@@ -338,16 +354,25 @@ def build(inst, drum):
     return b, att16 // 16 * 9, root, info, rms
 
 
-def cached(inst, drum):
+def cached(inst, manifest, drum):
     h = hashlib.sha256(json.dumps([VERSION, inst, drum], sort_keys=True, default=str).encode())
-    rec_path = GENWAV / (inst["src"][1] + ".wav") if inst["src"][0] == "genwav" else None
+    rec_path = None
+    src = inst["src"]
+    if src[0] == "cc0" and inst["name"] in manifest:
+        rec_path = CC0 / manifest[inst["name"]]["file"]
+    elif src[0] == "asset":
+        rec_path = SRC / "assets" / "samples-cc0" / src[1]
+    elif src[0] == "genwav":
+        rec_path = GENWAV / (src[1] + ".wav")
     if rec_path is not None:
         h.update(rec_path.read_bytes() if rec_path.exists() else b"missing")
+        if src[0] == "cc0":
+            h.update(json.dumps(manifest[inst["name"]], sort_keys=True).encode())
     f = CACHE / (h.hexdigest()[:24] + ".json")
     if f.exists():
         d = json.loads(f.read_text())
         return bytes.fromhex(d["brr"]), d["loop"], d["root"], d["info"], d["rms"]
-    b, lp, root, info, rms = build(inst, drum)
+    b, lp, root, info, rms = build(inst, manifest, drum)
     CACHE.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps({"brr": b.hex(), "loop": lp, "root": root, "info": info, "rms": rms}))
     return b, lp, root, info, rms
@@ -357,6 +382,8 @@ def cached(inst, drum):
 def main():
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
+    man_p = CC0 / "manifest.json"
+    manifest = json.loads(man_p.read_text(encoding="utf-8")) if man_p.exists() else {}
     data, rows, info = bytearray(), [], []
 
     def add(name, b, lp, root, what, rms):
@@ -367,10 +394,10 @@ def main():
         info.append(f"{name:8} {len(b):6} B  {what}{err}")
 
     for inst in bank.INSTRUMENTS:
-        add(inst["name"], *cached(inst, False))
+        add(inst["name"], *cached(inst, manifest, False))
     nmel = len(rows)
     for inst in bank.DRUMS:
-        add(inst["name"], *cached(inst, True))
+        add(inst["name"], *cached(inst, manifest, True))
     index = {r[0]: i for i, r in enumerate(rows)}
     kits = list(bank.KITS.items())
     sel_names = [r[0] for r in rows[:nmel]] + [k for k, _ in kits]

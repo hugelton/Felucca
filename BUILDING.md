@@ -75,6 +75,11 @@ again from the source repositories. Without that folder the build still works, w
 instrument sets in the SAMPLE engine and no PIANO in SLICE (the PIANO set's middle C): they play a plain sine
 at the note's pitch instead, and the screen says NO SAMPLE.
 
+The SNES engine's bank (`FELUCCA_SNES=1`) is built by `tools/gen_brr.py` from short excerpts of the same
+libraries in `assets/snes-cc0/` (with `manifest.json`: each recording's measured note and tuning, and
+`ATTRIBUTION.txt`). `tools/fetch_snes_cc0.py` downloads them again (it needs numpy to measure them); an
+instrument whose recording is missing plays a synthesized stand-in.
+
 ## Browser emulator
 
 ```
