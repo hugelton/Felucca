@@ -28,6 +28,21 @@ export function restoreSectors(nor, sectors) {
 
 export const HOLD_MS = 24;
 
+// The panel's knobs from a MIDI controller (the page's Web MIDI in): CC 20..26 turn SELECT, ALGORITHM, PRESETS,
+// KNOB 1..4 (the encoder roles) by how far the controller's knob moves, a detent a step, so it takes over from
+// anywhere without a jump; CC 27 sets MASTER. The firmware's CC map (midi_control.c) has none of them, so they
+// stay here. last: the value each knob CC sent before (the first one only takes its place).
+// -> {role, n} | {master: 0..1023} | null (not one of them: on to the firmware)
+export const KNOB_CC = 20, MASTER_CC = 27;
+export function midiKnob(last, cc, value) {
+  if (cc === MASTER_CC) return { master: Math.round(value * 1023 / 127) };
+  const role = cc - KNOB_CC;
+  if (role < 0 || role >= 7) return null;
+  const was = last[role];
+  last[role] = value;
+  return { role, n: was === undefined ? 0 : value - was };
+}
+
 if (typeof registerProcessor === "function") {
   const clock = globalThis.performance ? () => globalThis.performance.now() : () => Date.now();
   class Felucca extends AudioWorkletProcessor {
