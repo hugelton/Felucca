@@ -85,6 +85,12 @@
 #                   operator envelopes (stages, rates, the voice ending), bit-stable notes, a click-free retrigger, no DC /
 #                   clipping over the factory patches, the macros' directions, PTCH, pack / unpack and the SysEx
 #                   layouts, the 6-voice cap, the cost per voice; demos in build/fm6_demo/.
+# SNES (tests/snes_test.c, built with FELUCCA_SNES=1: a prototype engine): the S-DSP voice (src/eng_snes.c) sample for
+#                   sample against snes_spc's SPC_DSP.cpp (tests/snes_ref.cpp, when SNES_SPC points at a checkout):
+#                   BRR, Gaussian interpolation, ADSR, GAIN, noise, the echo (FIR, feedback); its rate countdowns
+#                   against the chip's counter; the presets in the mix (peak, clipping, voices freed, the echo idle),
+#                   the pitch register; the echo line in PHYS's memory (either engine after the other = from
+#                   boot); demos in build/snes/.
 # Change baseline entries only for reviewed, intentional differences in sound or cost;
 # retain every unaffected golden / CPU / target entry. VERBOSE=1: every render.
 set -e
@@ -225,6 +231,18 @@ if [ -f build/gen/felucca_tables.h ]; then
         run "PHYS: the fixed-point models against DaisySP's float originals (mode frequencies, decays, Svf)" "$OUT/phys_ref"
     else
         echo "== skip PHYS reference test (no DaisySP: set DAISYSP to a checkout)"
+    fi
+    S=${SNES_SPC:-vendor/snes_spc}/snes_spc
+    if [ -f "$S/SPC_DSP.cpp" ] && command -v c++ >/dev/null 2>&1; then
+        python3 tools/gen_brr.py build/gen/felucca_brr.h >/dev/null
+        c++ -O2 -w -I"$S" -Ibuild/gen -Itests -o "$OUT/snes_ref" tests/snes_ref.cpp
+        "$OUT/snes_ref" "$OUT/snes_ref.bin" >/dev/null
+        $CC -O2 -w -DFELUCCA_SNES=1 -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/snes_test" tests/snes_test.c -lm
+        mkdir -p build/snes
+        run "SNES (prototype): the S-DSP voice bit for bit against snes_spc, counters, presets, pitch, demos" \
+            "$OUT/snes_test" "$OUT/snes_ref.bin" build/snes
+    else
+        echo "== skip SNES test (no snes_spc: set SNES_SPC to a checkout)"
     fi
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/drum_test" tests/drum_test.c -lm
     mkdir -p build/drum_demo

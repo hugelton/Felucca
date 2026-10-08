@@ -20,7 +20,16 @@
 #define FELUCCA_FM4 0            /* the DIGITAL engine (eng_digital.c, four-operator FM): kept in the tree, not built
                                   * by default; replaced by FM6, its sounds convert (fm4_convert.c) */
 #endif
-#define NENGINES (13 + FELUCCA_SLICE)   /* SLICE (13) comes last: the other engines keep their numbers */
+#ifndef FELUCCA_SNES
+#define FELUCCA_SNES 0           /* the SNES engine (eng_snes.c), engine 14: a PROTOTYPE, not built by default.
+                                  * Before it is: NENGINES is the favourites' "user preset" mark (favorites.c),
+                                  * stored in the settings, so a 15th engine needs that mark migrated first */
+#endif
+#if FELUCCA_SNES && !FELUCCA_SLICE
+#error "FELUCCA_SNES needs FELUCCA_SLICE (SNES is engine 14, after SLICE)"
+#endif
+#define NENGINES (13 + FELUCCA_SLICE + FELUCCA_SNES)   /* SLICE (13), SNES (14) come last: the other engines keep
+                                                        * their numbers */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define NENG_SHOWN (NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
                                                 * in the display order of engines.c ENGINE_ORDER */
@@ -208,6 +217,9 @@ typedef struct {                 /* an engine (engines.c ENGINES[]; the eng_*.c 
      * done() says so (once per control tick, before the render), not at the end of the ADSR's release */
     uint8_t ownenv;
     int (*done)(struct track *t, voice_t *v);
+    /* optional: once per block and part, after its voices, on their sum in out (SNES: its echo); returns 1
+     * while it still sounds with no voice (the part is mixed on), 0 = silent */
+    uint32_t (*post)(struct track *t, int32_t *out, uint32_t n);
 } engine_t;
 
 /* ------------------------------------------------- tracks, the song --- */
@@ -332,6 +344,8 @@ typedef struct {
 
 static track_t trk[NTRK];        /* the instrument: four parts */
 static song_t song;
+static uint32_t mix_blocks;      /* blocks mixed since boot (fx.c mix_block): an engine sees by a gap in it that
+                                  * its part ran another engine meanwhile (SNES: PHYS's memory, eng_phys.c) */
 #define TSEL (&trk[song.sel])    /* the selected track */
 
 /* SWING of a track's step clock: the track's own plus the global one, at most 100 (#31). The sequencer

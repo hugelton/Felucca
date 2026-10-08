@@ -112,6 +112,12 @@ def generate():
             failed.append(c[0].name)
     if failed:
         raise SystemExit(f"build: {', '.join(failed)} failed")
+    # after the others: the SNES engine's kit is made of gen_samples.py's drums (build/genwav)
+    r = subprocess.run([sys.executable, str(tools / "gen_brr.py"), str(GEN / "felucca_brr.h")], stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True)
+    sys.stdout.write(r.stdout)
+    if r.returncode:
+        raise SystemExit("build: gen_brr.py failed")
 
 
 # ---- update loader
@@ -180,7 +186,7 @@ def build_app():
     flags = [*CFLAGS, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
     for flag in ("FELUCCA_FLASH", "FELUCCA_OTA", "FELUCCA_OTA_DRYRUN", "FELUCCA_OTA_RAMONLY", "FELUCCA_CDC",
                  "FELUCCA_UART", "FELUCCA_UAC", "FELUCCA_UAC_TONE", "FELUCCA_ICONS", "FELUCCA_SLICE", "FELUCCA_FM4",
-                 "FELUCCA_CDC_DEFAULT"):
+                 "FELUCCA_CDC_DEFAULT", "FELUCCA_SNES"):
         v = os.environ.get(flag)    # unset: the default in firmware/src/felucca.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")

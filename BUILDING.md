@@ -62,6 +62,7 @@ Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`, `c
 | `FELUCCA_SLICE` | 1 | the SLICE engine |
 | `FELUCCA_ICONS` | 1 | parameter icons on the knob cards |
 | `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion |
+| `FELUCCA_SNES` | 0 | the SNES engine, a prototype (engine 14: `firmware/src/eng_snes.c`) |
 
 `FELUCCA_USB_LAYOUT` (`0` to `3`, default `0`) picks other USB descriptor layouts for testing; see
 `firmware/src/usb.c`.
@@ -102,7 +103,9 @@ drawing code against stubs: every screen in every palette is rendered and checke
 overlapping text; PNGs land in `build/ui_new/`), every engine (DRUM, NOISE, PHYS, FM6, SLICE, the
 DIGITAL conversion), the chord keys, the modulation matrix, the FX layer, the reverbs, the SLICER
 and swing. With `DAISYSP` pointing at a DaisySP checkout, the PHYS models are also compared with
-their floating-point originals; without it that test is skipped.
+their floating-point originals; without it that test is skipped. Likewise with `SNES_SPC` pointing at a
+snes_spc 0.9.0 checkout, the SNES engine (built with `FELUCCA_SNES=1`) is compared sample for sample with its
+S-DSP (`tests/snes_ref.cpp`, needs `c++`).
 
 The regression suite (`tests/regress.c`) renders every engine and preset and compares a
 hash of each render with `tests/golden.txt`; it also checks levels, voices and the CPU

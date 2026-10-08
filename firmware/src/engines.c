@@ -22,6 +22,9 @@
 #if FELUCCA_SLICE
 #include "eng_slice.c"
 #endif
+#if FELUCCA_SNES
+#include "eng_snes.c"           /* SNES: the S-DSP's voice, ported from snes_spc (LGPL-2.1-or-later) */
+#endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder */
 static const engine_t *const ENGINES[NENGINES] = {
@@ -44,6 +47,9 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_FM6,                    /* 12 (ENGI_FM6) */
 #if FELUCCA_SLICE
     &ENG_SLICE,                  /* 13 (FELUCCA_SLICE=0 builds without it) */
+#endif
+#if FELUCCA_SNES
+    &ENG_SNES,                   /* 14 (FELUCCA_SNES=1 builds it: a prototype) */
 #endif
 };
 
@@ -80,7 +86,11 @@ static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
 #if FELUCCA_FM4
     1,                           /* DIGITAL */
 #endif
-    2, 3, 4, 5, 6, 7, 8, 9,      /* PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS */
+    2, 3,                        /* PHASE LOFI */
+#if FELUCCA_SNES
+    14,                          /* SNES, by its chiptune neighbour */
+#endif
+    4, 5, 6, 7, 8, 9,            /* SAMPLE VOICE TRIO WHEEL GRAIN PHYS */
     11,                          /* NOISE */
 #if FELUCCA_SLICE
     13,                          /* SLICE */

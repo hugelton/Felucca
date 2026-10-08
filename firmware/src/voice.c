@@ -596,6 +596,8 @@ static uint32_t track_render(track_t *t, int32_t *out, uint32_t n)
         e->render(t, v, out, n, &m);
         nr++;
     }
+    if (e->post)                                        /* the engine's part-wide output (SNES: echo) */
+        nr += e->post(t, out, n);
     if (fade) {
         for (i = 0; i < 8u; i++)
             t->p[P_E0 + i] = pe_new[i];

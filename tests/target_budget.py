@@ -25,10 +25,13 @@ FUNCS = ["analog_render", "digital_render", "digital_render_legacy", "digital_re
          "fm1_alnk0_irq", "fm1_timer5_irq",               # the audio ISR; TIMER5: the key / LED scan (hal/fm1_input.h)
          "mod_begin", "mod_voice", "mod_end",                 # the modulation matrix (mod.c), called when active
          "perf_begin", "perf_mute", "perf_pre", "perf_block", "perf_master",   # the FX layer (perform.c), when busy
-         "rev_room", "rev_spring"]                # the reverb bus (fx.c): REVERB TYPE ROOM / SPRING
+         "rev_room", "rev_spring",                # the reverb bus (fx.c): REVERB TYPE ROOM / SPRING
+         "snes_render", "snes_block", "snes_post"]   # SNES (eng_snes.c, FELUCCA_SNES=1): the voices, the chip clock, the echo
 # built only with FELUCCA_FM4=1 (DIGITAL, src/eng_digital.c; not in the default build, so not in BUDGET): absent,
-# they are skipped; present, checked against these (their budget lines until the engine was retired in 1.0)
-OPTIONAL = {"digital_render": 12, "digital_render_legacy": 333, "digital_render_custom": 558}
+# they are skipped; present, checked against these (their budget lines until the engine was retired in 1.0).
+# Likewise SNES (FELUCCA_SNES=1, a prototype): its first target build (JieLi toolchain 20250805.1)
+OPTIONAL = {"digital_render": 12, "digital_render_legacy": 333, "digital_render_custom": 558,
+            "snes_render": 510, "snes_block": 102, "snes_post": 299}
 TOL = 0.10                      # exact (no noise): small edits pass, a grown render loop does not
 DIV_W = 8                       # a divide weighs 1 + 8 instructions
 NEST = 4                        # an instruction in a loop inside a loop weighs 4, two deep 16, ...
