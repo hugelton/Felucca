@@ -27,11 +27,14 @@ FUNCS = ["analog_render", "digital_render", "digital_render_legacy", "digital_re
          "click_render",                                    # the metronome's click (click.c), while it sounds
          "mod_begin", "mod_voice", "mod_end",                 # the modulation matrix (mod.c), called when active
          "perf_begin", "perf_mute", "perf_pre", "perf_block", "perf_master",   # the FX layer (perform.c), when busy
-         "rev_room", "rev_spring"]                # the reverb bus (fx.c): REVERB TYPE ROOM / SPRING
+         "rev_room", "rev_spring",                # the reverb bus (fx.c): REVERB TYPE ROOM / SPRING
+         "adp_render", "adp_block", "adp_post"]      # ADPCM (eng_adpcm.c, FELUCCA_ADPCM=1): the voices, the clock, the echo
 # built only with FELUCCA_FM4=1 (DIGITAL, src/eng_digital.c; not in the default build, so not in BUDGET): absent,
-# they are skipped; present, checked against these (their budget lines until the engine was retired in 1.0)
+# they are skipped; present, checked against these (their budget lines until the engine was retired in 1.0).
+# Likewise ADPCM (FELUCCA_ADPCM=1, off by default): its first target build (JieLi toolchain 20250805.1)
 OPTIONAL = {"digital_render": 12, "digital_render_legacy": 333, "digital_render_custom": 558,
-            "uac_tap48": 504}           # (absent from a FELUCCA_UAC_48K=0 or FELUCCA_UAC=0 build)
+            "uac_tap48": 504,           # (absent from a FELUCCA_UAC_48K=0 or FELUCCA_UAC=0 build)
+            "adp_render": 1991, "adp_block": 102, "adp_post": 299}   # (adp_render: adp_tick inlined)
 TOL = 0.10                      # exact (no noise): small edits pass, a grown render loop does not
 DIV_W = 8                       # a divide weighs 1 + 8 instructions
 NEST = 4                        # an instruction in a loop inside a loop weighs 4, two deep 16, ...
