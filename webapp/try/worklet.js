@@ -6,9 +6,9 @@
 // the lights and any changed flash go out. After X0X's web/emu/worklet.js (charlesvestal/fm1-x0x, GPL-3.0).
 
 // The flash the page keeps: storage.c's areas (projects, user presets and their FM6 patches, the user sample
-// slots 0x97000..0xDFFFF; the settings and the second FM6 copy 0xFC000..0xFFFFF), only the sectors that hold
-// something (an erased sector is all 0xFF). {offset: bytes}
-export const STORE_AREAS = [[0x97000, 0xE0000], [0xFC000, 0x100000]];
+// slots 0x97000..0xDFFFF; the autosave 0xE5000..0xE6FFF (1.2); the settings and the second FM6 copy
+// 0xFC000..0xFFFFF), only the sectors that hold something (an erased sector is all 0xFF). {offset: bytes}
+export const STORE_AREAS = [[0x97000, 0xE0000], [0xE5000, 0xE7000], [0xFC000, 0x100000]];
 export function storeSectors(nor) {
   const out = {};
   for (const [a, b] of STORE_AREAS)
@@ -77,11 +77,14 @@ if (typeof registerProcessor === "function") {
       const ex = this.ex, mem = ex.memory.buffer;
       const msg = { type: "frame" };
       const leds = [ex.web_lit_buttons(), ex.web_lit_keys(), ex.web_dim_buttons(), ex.web_dim_keys(), ex.web_dim_level(),
-                    ex.web_breath_buttons(), ex.web_breath_keys()];
-      const key = leds.join(",");
+                    ex.web_breath_buttons(), ex.web_breath_keys(), ex.web_mid_keys ? ex.web_mid_keys() : 0];
+      const an = ex.web_anim_levels ? ex.web_anim_levels() : 0;   // the power-on sweep: each LED's level
+      const anim = an ? Array.from(new Uint8Array(mem, an, 41)) : null;
+      const key = leds.join(",") + (anim ? ";" + anim.join(",") : "");
       if (key !== this.sentLeds) {
         this.sentLeds = key;
         msg.leds = leds;
+        msg.anim = anim;
       }
       if (this.frames >= 44100) {                     // the share of real time spent running the device
         msg.load = this.busy / (this.frames / 44.1);

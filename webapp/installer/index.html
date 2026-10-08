@@ -847,6 +847,7 @@ const TEXT = {
     nomidi: "このブラウザでは使えません。Chrome か Edge で開いてください。", loadfail: "読み込めませんでした: ",
     start: "開始します", verify: "確認中", loader: "書き込みモードに切り替え中", write: "書き込み中",
     reboot: "再起動中", done: "完了しました", stopped: "途中で止まりました。USB を挿し直してもう一度押してください。",
+    inupdate: "書き込みが終わりませんでした。FM-1 は更新モードのままです（パッケージが受け付けられなかった場合は何も消えていません）。ページを再読み込みして「インストール」を押すと続きから書き込みます。",
     error: "エラー: ",
     denied: "MIDI（SysEx）の使用が許可されませんでした。アドレスバーのサイト設定で MIDI を許可して、もう一度押してください。",
     notfound: "FM-1 が見つかりません。USB ケーブル（データ通信用か）を確かめ、MIDI を使う他のアプリを閉じてから、もう一度押してください。",
@@ -880,6 +881,7 @@ const TEXT = {
     nomidi: "This browser cannot do it. Open the page in Chrome or Edge.", loadfail: "Could not load: ",
     start: "Starting", verify: "Verifying", loader: "Switching to update mode", write: "Writing",
     reboot: "Restarting", done: "Done", stopped: "Stopped. Replug the USB cable and press Install again.",
+    inupdate: "The write did not finish. The FM-1 stays in update mode (if the package was refused, nothing was erased). Reload this page and press Install to resume.",
     error: "Error: ",
     denied: "MIDI (SysEx) access was not allowed. Allow MIDI in the site settings (address bar) and press Install again.",
     notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps that use MIDI, and press Install again.",
@@ -907,8 +909,14 @@ applyLang();
 const sayK = (k, arg = "") => { lastKey = k; lastArg = arg; $("status").textContent = t(k) + arg; };
 const say = (txt) => { lastKey = null; $("status").textContent = txt; };
 const log = (t) => { $("log").textContent += t + "\n"; };
-let image = null;
-const meta = {"version": "1.0.5.2", "product": "FM-1_910", "pkg": "../../firmware/felucca-1.0.5.2.fwsc"};
+let image = null, pkgBytes = null, flashSize = 0;
+const meta = {"version": "1.1.5", "product": "FM-1_911", "pkg": "../../firmware/felucca-1.1.5.fwsc", "size": 610086, "sha256": "a6034141cbb74f55c767c3c89935e70dd3a0a91fed238ab158a9ef684033147b"};
+/* the served package as make_site pinned it (size, SHA-256): checked when it loads and again before the write */
+const pinned = async (b) => (meta.size == null || b.length === meta.size) && (!meta.sha256 || await sha256hex(b) === meta.sha256);
+/* the update loader's requests for flash.bin: one read per 512 bytes, from 1.1 two (it checks the package before it
+   erases); the bar never goes past the end */
+const vnum = (s) => (String(s).match(/\d+/g) || []).map(Number);
+const newer = (a, b) => { const x = vnum(a), y = vnum(b); for (let i = 0; i < 4; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return true; };
 
 let writing = false, stock = null, stockFileEpoch = 0;
 const lockInstaller = (on) => { writing = on; $("go").disabled = on || !image; $("stock-go").disabled = on || !stock; $("stock-file").disabled = on; $("stock-recovery").disabled = on; };
@@ -920,7 +928,9 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
     const r = await fetch(meta.pkg);
     if (!r.ok) throw new Error(`${meta.pkg}: HTTP ${r.status}`);
     const pkg = new Uint8Array(await r.arrayBuffer());
-    if (productOf(pkg) !== meta.product) { sayK("badpkg"); return; }
+    if (productOf(pkg) !== meta.product || !(await pinned(pkg))) { sayK("badpkg"); return; }
+    pkgBytes = pkg;
+    try { flashSize = new Package(pkg).flashSize; } catch (e) { flashSize = 0; }
     image = logicalImage(pkg);
     say(`Felucca ${meta.version}`);
     $("go").disabled = false;
@@ -933,26 +943,30 @@ $("go").addEventListener("click", async () => {
   let midi;
   try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
   catch (e) { sayK("denied"); lockInstaller(false); return; }
+  let wrote = false;
   try {
+    if (!pkgBytes || !(await pinned(pkgBytes))) { sayK("badpkg"); lockInstaller(false); return; }
     const up = new Updater(midi, log);
-    const total = 74 + 1167;
+    let writes = flashSize ? Math.ceil(flashSize / 512) * (newer(meta.version, "1.1") ? 2 : 1) : 1167;
     const step = (k, a) => {
       log(`${k} ${a ?? ""}`);
       if (k === "start") sayK("start");
-      if (k === "verify") { sayK("verify"); $("bar").value = (a / total) * 100; }
+      if (k === "verify") { sayK("verify"); $("bar").value = (Math.min(a, 74) / (74 + writes)) * 100; }
       if (k === "loader") sayK("loader");
-      if (k === "write") { sayK("write"); $("bar").value = ((74 + a) / total) * 100; }
+      if (k === "write") { wrote = true; writes = Math.max(writes, a); sayK("write"); $("bar").value = ((74 + a) / (74 + writes)) * 100; }
       if (k === "reboot") sayK("reboot");
       if (k === "done") { $("bar").value = 100; sayK("done"); }
     };
     const ota = await up.find((id) => /^ota-/i.test(id.model));
     if (ota) {
       ota.link.close();
-      sayK((await up.resume(image, step, meta.product)) ? "done" : "stopped");
+      wrote = true;
+      sayK((await up.resume(image, step, meta.product)) ? "done" : "inupdate");
     } else {
       await up.install(image, meta.product, step);
     }
   } catch (e) {
+    if (wrote && !(e && e.code && ["noreturn", "mismatch"].includes(e.code))) { sayK("inupdate"); log(String(e && e.stack || e)); lockInstaller(false); return; }
     if (e && e.code && TEXT[lang][e.code]) sayK(e.code, e.detail || "");
     else sayK("error", e && e.message);
     log(String(e && e.stack || e));

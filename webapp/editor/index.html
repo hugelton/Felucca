@@ -8,7 +8,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Felucca Editor</title>
 <link rel="icon" href="data:,">
-<meta name="felucca-release" content="1.0.5.2">
+<meta name="felucca-release" content="1.1.5">
   <meta name="felucca-try" content="1">
 <style>
 /* SPDX-License-Identifier: GPL-3.0-only
@@ -537,7 +537,12 @@ const __m0 = (() => {
 // - INFO advertises the full backup (42 01 03) and BACKUP_LIST / GET / PUT answer as the firmware's (opt.noBackup: not)
 // - 1.0.4: the MENU settings (INFO 4E 01 count, MENU_DESC 72, MENU_SET 73; opt.noMenu: not), the firmware's items (MENU)
 // - 1.0.5: ratchets (INFO 52 01 04, a byte after the chance in steps; opt.noRatchet: not), MENU tabs
+// - 1.1: parameter locks (INFO 4C 01 01, MOTION ops 5..7 with the kinds; opt.noLocks: not)
 // - 1.0.5: MENU_DESC ends with the item's tab (index, name: MENU_TABS; opt.noMenuTabs: not, as 1.0.4)
+// - 1.1: MENU items 12..14 CLICK, CLICK LEVEL, COUNT-IN (AUDIO), appended after USB SERIAL (INFO 4E 01 15)
+// - 1.2: MENU item 15 RESTORE LAST (SYSTEM), appended (INFO 4E 01 16); item 16 SCALE LEDS (CONTROL), appended (INFO 4E 01 17)
+// - 1.1.5: MENU item 17 SCREEN OFF (DISPLAY), appended (INFO 4E 01 18)
+// - 1.2: ARP MODE (P_AMODE) gained DNUP UP+8 CONV DIVG PINKY THUMB WALK CHORD (values 7..14, appended)
 /*PROTO-BEGIN*/
 /* ---------------------------------------------------------------- protocol --- */
 const HDR = [0x7D, 0x46, 0x4C];
@@ -634,6 +639,7 @@ const parse = {
     o.fm6 = null;                                 /* FM6 patches (cmds 68..71): the factory and bank slot counts */
     o.syncCaps = 0;                               /* live sync: bit 0 WATCH while on keeps pending pushes, bit 1 no RELOAD */
     o.ratchet = 0;                                /* a step's ratchet (STEP_SET's byte after the chance), 0 = none */
+    o.locks = 0;                                  /* parameter locks (MOTION ops 5..7), 0 = none */
     for (const p of [8, 11]) if (o.motionMax && trailer[p] === 0x46 && trailer[p + 1] === 1) {   /* for the editor's */
       o.fm6 = { factory: trailer[p + 2], bank: trailer[p + 3], caps: 0 };                         /* PRESET / G_ENGSEL */
       if (trailer[p + 4] === 0x53 && trailer[p + 5] === 1) o.syncCaps = trailer[p + 6] & 3;
@@ -643,7 +649,8 @@ const parse = {
       if (trailer[p + 7] === 0x50 && trailer[p + 10] === 0x4E && trailer[p + 11] === 1) o.menuCount = trailer[p + 12];
       let r = trailer[p + 7] === 0x50 ? p + 10 : p + 7;                                   /* RATCH after FM6 v2 */
       if (trailer[r] === 0x4E && trailer[r + 1] === 1) r += 3;                            /* and the MENU settings (1.0.4) */
-      if (o.syncCaps && trailer[r] === 0x52 && trailer[r + 1] === 1) o.ratchet = trailer[r + 2];   /* RATCH: max hits (1.0.5) */
+      if (o.syncCaps && trailer[r] === 0x52 && trailer[r + 1] === 1) { o.ratchet = trailer[r + 2]; r += 3; }   /* RATCH: max hits (1.0.5) */
+      if (o.ratchet && trailer[r] === 0x4C && trailer[r + 1] === 1) o.locks = trailer[r + 2];   /* parameter locks (1.1) */
     }
     o.menuCount = o.menuCount || 0;
     return o;
@@ -696,8 +703,11 @@ const parse = {
   },
   [CMD.MOTION](a) {
     const r = new Reader(a), o = { track: r.b(), rc: r.b(), on: !!r.b(), count: r.b(), max: r.b(), events: [] };
-    if (o.count > o.max || o.max !== 64 || a.length !== 5 + o.count * 4) throw new Error("Invalid motion reply");
+    const kinds = a.length === 5 + o.count * 5;     /* (1.1: ops 5..7 then a kind per record, 0 automation, 1 lock) */
+    if (o.count > o.max || o.max !== 64 || (a.length !== 5 + o.count * 4 && !kinds)) throw new Error("Invalid motion reply");
     for (let i = 0; i < o.count; i++) o.events.push({ step: r.b(), param: r.b(), value: r.v() });
+    if (kinds) o.events.forEach((e) => { e.lock = r.b() === 1; });
+    o.kinds = kinds && o.count > 0;
     return o;
   },
   [CMD.NAMES](a) {
@@ -823,9 +833,11 @@ const req = {
     return [CMD.SONG, op === 1 ? [op, rows.length, ...rows.flatMap((r) => [r.slot, r.repeat])] : [op]];
   },
   motion: (track, op = 0, arg = {}) => {
-    if (!Number.isInteger(track) || track < 0 || track > 3 || ![0, 1, 2, 3, 4].includes(op)) throw new Error("Invalid motion request");
-    return [CMD.MOTION, [track, ...(op === 0 ? [] : op === 1 ? [op, arg.on ? 1 : 0] : op === 2 ? [op] :
-      [op, arg.step & 63, arg.param & 127, ...(op === 3 ? v14enc(arg.value) : [])])]];
+    /* 1.1: op 5 set a lock (as 3), 6 clear a step's locks (step 127: every step's), 7 the query with the kinds */
+    if (!Number.isInteger(track) || track < 0 || track > 3 || ![0, 1, 2, 3, 4, 5, 6, 7].includes(op)) throw new Error("Invalid motion request");
+    return [CMD.MOTION, [track, ...(op === 0 ? [] : op === 1 ? [op, arg.on ? 1 : 0] : op === 2 || op === 7 ? [op] :
+      op === 6 ? [op, arg.step === 127 ? 127 : arg.step & 63] :
+      [op, arg.step & 63, arg.param & 127, ...(op === 3 || op === 5 ? v14enc(arg.value) : [])])]];
   },
   names: (e) => [CMD.NAMES, [e & 0x7F]],
   smpBegin: (s) => [CMD.SMP_BEGIN, [s & 0x7F]],
@@ -836,7 +848,9 @@ const req = {
   upList: (start, count) => [CMD.UP_LIST, [start & 0x7F, Math.max(1, Math.min(UP.LIST_MAX, count | 0))]],
   upGet: (s) => [CMD.UP_GET, [s & 0x7F]],
   /* patch: {engine, name, p: P_COUNT values, pattern: 16 x [note, flags] or grid: 16 x [hit, acc] (v5: kind 1)} */
-  upPut: (s, pt) => [CMD.UP_PUT, [s & 0x7F, pt.engine & 0x7F, ...strEnc(upName(pt.name)), ...pt.p.flatMap((v) => v14enc(v ?? 0)),
+  /* (an unset value: 0, but a DRUM lane level 127, as the device loads a 1.0.x record: the kit not silenced) */
+  upPut: (s, pt) => [CMD.UP_PUT, [s & 0x7F, pt.engine & 0x7F, ...strEnc(upName(pt.name)),
+    ...pt.p.flatMap((v, i) => v14enc(v ?? (pt.p.length >= 99 && P_LANES.includes(i) ? 127 : 0))),
     ...(pt.grid
       ? [...Array.from({ length: UP.PAT }, (_, i) => hitsEnc(...(pt.grid[i] || [0, 0])).slice(0, 2)).flat(), 1,
          ...Array.from({ length: UP.PAT }, (_, i) => hitsEnc(...(pt.grid[i] || [0, 0]))[2])]
@@ -1457,6 +1471,7 @@ async function capturePatch(rq, info, name) {
    E0 E1 of the 89-parameter firmware) */
 const TRACK_OWN = new Set([0, 39, 40, ...Array.from({ length: 16 }, (_, i) => 17 + i), 45, 46, 47, 48]);
 const P_CHORD = [81, 82];                          /* core.h P_CHRD, P_VOIC (since P_COUNT 91, P_E0 83) */
+const P_LANES = [83, 84, 85, 86, 87, 88, 89, 90];   /* core.h P_LN0..P_LN7: the DRUM lane levels (since P_COUNT 99, P_E0 91) */
 const trackOwn = (i, pe0) => TRACK_OWN.has(i) || (pe0 >= 83 && P_CHORD.includes(i));
 /* play a patch without writing flash, as UP_LOAD would load it: the sound only. SET the engine (G_ENGSEL:
    engine defaults and its first preset), then every instrument parameter that differs, except the track's
@@ -1879,6 +1894,16 @@ const MENU = [
   { id: 8, name: "BPM LOCK", names: ["OFF", "ON"], def: 0, tab: 1 },
   { id: 9, name: "SPEAKER EQ", names: ["FLAT", "LOWCUT", "BASS+"], def: 0, tab: 2 },
   { id: 10, name: "USB LEVEL", names: ["MASTER", "FIXED"], def: 0, tab: 2 }, { id: 11, name: "USB SERIAL", names: ["ON", "OFF"], def: 0, tab: 3 },
+  /* 1.1 (Discussion #131): the metronome and the count-in, appended (index = id), shown in AUDIO */
+  { id: 12, name: "CLICK", names: ["OFF", "REC", "ON"], def: 0, tab: 2 },
+  { id: 13, name: "CLICK LEVEL", names: ["LOW", "MID", "HIGH"], def: 1, tab: 2 },
+  { id: 14, name: "COUNT-IN", names: ["OFF", "1 BAR", "2 BARS"], def: 0, tab: 2 },
+  /* 1.2 (Discussion #130): the last session back at power-on (the autosave), appended, shown in SYSTEM */
+  { id: 15, name: "RESTORE LAST", names: ["ON", "OFF"], def: 0, tab: 3 },
+  /* 1.2 (Discussion #127): the keys show the selected track's scale, appended, shown in CONTROL */
+  { id: 16, name: "SCALE LEDS", names: ["OFF", "ON"], def: 0, tab: 1 },
+  /* 1.1.5: the screen and its backlight off after a while without panel input (the sound goes on), shown in DISPLAY */
+  { id: 17, name: "SCREEN OFF", names: ["NEVER", "5 MIN", "15 MIN", "30 MIN", "60 MIN"], def: 3, tab: 0 },
 ];
 /* the MENU settings the device offers, in its menu's order (firmware without them: []); rq as the other readers */
 async function readDeviceMenu(rq, info) {
@@ -1903,7 +1928,7 @@ function makeMockDevice(opt = {}) {
     D("FLT", F.BIPCT, -64, 63, 0), D("PIT", F.BIPCT, -64, 63, 0), D("SHP", F.BIPCT, -64, 63, 0), D("FX", F.BIPCT, -64, 63, 0),
     D("RATE", F.LFOHZ, 0, 127, 60), E("WAVE", ["SIN", "TRI", "SAW", "SQR", "S&H"], 0), D("PHS", F.INT, 0, 127, 0), D("FADE", F.TIME, 0, 127, 0),
     D("PIT", F.BIPCT, -64, 63, 0), D("FLT", F.BIPCT, -64, 63, 0), D("SHP", F.BIPCT, -64, 63, 0), D("AMP", F.PCT, 0, 127, 0),
-    E("MODE", ["OFF", "UP", "DN", "UPDN", "RND", "ORD", "REPEAT"], 0), E("RATE", NDIV, 2), D("OCT", F.INT, 1, 4, 1), D("GATE", F.PCT, 1, 127, 64),
+    E("MODE", ["OFF", "UP", "DN", "UPDN", "RND", "ORD", "REPEAT", "DNUP", "UP+8", "CONV", "DIVG", "PINKY", "THUMB", "WALK", "CHORD"], 0), E("RATE", NDIV, 2), D("OCT", F.INT, 1, 4, 1), D("GATE", F.PCT, 1, 127, 64),
     D("SWG", F.PCT, 0, 100, 0), D("PROB", F.PCT, 0, 127, 127), E("HOLD", NONOFF, 0), E("ORD", ["NOTE", "PLAY"], 0),
     D("ROOT", F.NOTE, 0, 11, 0), E("SCL", ["CHR", "MAJ", "MIN", "DOR", "MIX", "PEN", "MPEN", "HARM", "PHRY", "LYD", "LOC", "MEL", "BLUES", "WHOLE", "DIMHW", "DIMWH"], 0), E("QNT", ["OFF", "SNAP", "WHITE", "SEQ"], 0), D("TRN", F.SEMI, -24, 24, 0),
     D("LEN", F.STEPS, 1, 64, 16), E("DIV", NDIV, 2), D("SWG", F.PCT, 0, 100, 0), D("GATE", F.PCT, 1, 127, 64),
@@ -2028,7 +2053,8 @@ function makeMockDevice(opt = {}) {
   for (let op = 0; op < 4; op++) TP.push(D("ATK", F.TIME, 0, 127, 0), D("DEC", F.TIME, 0, 127, 0), D("SUS", F.PCT, 0, 127, 127), D("REL", F.TIME, 0, 127, 0), D("LVL", F.PCT, 0, 127, 127));
   TP.push(E("CHRD", ["OFF", "DIA3", "DIA7", "MAJ", "MIN", "DOM7", "MAJ7", "MIN7", "SUS4", "POW"], 0),   /* the chord keys 81, 82 */
     E("VOIC", ["CLOSE", "OPEN", "INV1", "INV2", "+OCT"], 0));
-  const P_COUNT = 91, G_COUNT = 27, NSTEP = 64, P_E0 = 83, G_ENGSEL = 20, P_SLCR = 45;
+  for (const l of ["KICK", "SNARE", "CLAP", "HATCL", "HATOP", "TOM", "RIM", "BELL"]) TP.push(D(l, F.PCT, 0, 127, 127));   /* 83..90: DRUM lane levels */
+  const P_COUNT = 99, G_COUNT = 27, NSTEP = 64, P_E0 = 91, G_ENGSEL = 20, P_SLCR = 45;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const enumOrig = (d, v) => d.fmt === F.ENUM && d.names ? aliasOf(d.names, v - d.min) + d.min : v;   /* params.c enum_orig */
   /* four tracks (firmware v3), four synth parts (1.0); engine / preset / p / step below are the selected track's */
@@ -2130,6 +2156,7 @@ function makeMockDevice(opt = {}) {
       : { engine: st.engine, name, p: st.p.slice(), pattern: patternFromSteps(st.step), grid: null, fm6 };
   };
   const ratchetOn = () => !!syncCaps() && !opt.noRatchet;   /* (INFO 52 01 04, after the sync tag) */
+  const locksOn = () => ratchetOn() && !opt.noLocks;          /* (INFO 4C 01 01, after the ratchet's: 1.1) */
   const stepOut = (x, b) => { b(x.n); x.notes.forEach(b); b(x.time); b(x.flags); b(x.vel); hitsEnc(x.hit, x.acc).forEach(b); if (!opt.legacy && !opt.v3 && !opt.v5) b(x.chance ?? 100); if (ratchetOn()) b(x.ratchet ?? 1); };
   function stepIn(x, a) {                         /* editor.c ed_step_put: n, 4 notes, time, flags, vel [, hits (3) [, chance [, ratchet]]] */
     x.n = Math.min(4, a[0]); x.notes = a.slice(1, 5); x.time = Math.min(2, a[5]); x.flags = a[6] & 3; x.vel = a[7];
@@ -2301,10 +2328,12 @@ function makeMockDevice(opt = {}) {
         if (a.length > 1 && st.chainPlaying) rc = 3;
         else if (a[1] === 1) m.on = !!a[2];
         else if (a[1] === 2) m.events = [];
-        else if (a[1] === 3 || a[1] === 4) {
+        else if (a[1] >= 5 && !locksOn()) return null;
+        else if (a[1] === 6) m.events = m.events.filter((e) => !e.lock || (a[2] !== 127 && e.step !== a[2]));
+        else if (a[1] === 3 || a[1] === 4 || a[1] === 5) {
           /* src/motion.c motion_param / motion_set_event: a step < 64, a parameter that can be recorded, its range */
           const id = a[3], rec = id < P_COUNT && (id <= 16 || (id >= 33 && id <= 36) || id === 38 || id === 39 || id === 44
-            || (id >= 61 && id <= 80) || id >= P_E0);
+            || (id >= 61 && id <= 80) || id >= P_LANES[0]);   /* (the lane levels, E0..E7) */
           const at = m.events.findIndex(e => e.step === a[2] && e.param === a[3]);
           if (a[2] >= NSTEP || !rec) rc = 1;
           else if (a[1] === 4) { if (at >= 0) m.events.splice(at, 1); }
@@ -2312,11 +2341,12 @@ function makeMockDevice(opt = {}) {
             const val = v14dec(a[4], a[5]), d = id >= P_E0 ? ENG[track.engine].edit[id - P_E0] : TP[id];
             if (!d || val < Math.max(-64, d.min) || val > Math.min(127, d.max)) rc = 1;
             else if (at < 0 && st.tracks.reduce((n,t) => n + t.motion.events.length, 0) >= 64) rc = 2;
-            else { const e = {step:a[2],param:a[3],value:val}; if (at >= 0) m.events[at] = e; else m.events.push(e); }
+            else { const e = {step:a[2],param:a[3],value:val,lock:a[1] === 5}; if (at >= 0) m.events[at] = e; else m.events.push(e); }
           }
         }
         [a[0],rc,+m.on,m.events.length,64].forEach(b);
         m.events.forEach(e => {b(e.step);b(e.param);v(e.value);});
+        if (a[1] >= 5) m.events.forEach(e => b(e.lock ? 1 : 0));   /* (1.1: the kinds after ops 5..7) */
         break;
       }
       case CMD.INFO:
@@ -2326,7 +2356,7 @@ function makeMockDevice(opt = {}) {
         if (!opt.legacy && !opt.v3 && !opt.v5) {
           b(16);
           if (st.uiCaps) { b(0x55); b(1); b(st.uiCaps); b(0x4d); b(1); b(64); b(1); if (!opt.noBackup) { b(0x42); b(1); b(3); } if (!opt.noFm6) { b(0x46); b(1); b(FM6.FACTORY_PK.length); b(0); }
-            if (syncCaps()) { b(0x53); b(1); b(syncCaps()); if (!opt.noFm6) { b(0x50); b(1); b(3); if (!opt.noMenu) { b(0x4E); b(1); b(MENU.length); } } if (ratchetOn()) { b(0x52); b(1); b(4); } } }   /* (FM6 v2: no bank, preset patches; MENU settings; RATCH) */
+            if (syncCaps()) { b(0x53); b(1); b(syncCaps()); if (!opt.noFm6) { b(0x50); b(1); b(3); if (!opt.noMenu) { b(0x4E); b(1); b(MENU.length); } } if (ratchetOn()) { b(0x52); b(1); b(4); if (locksOn()) { b(0x4C); b(1); b(1); } } } }   /* (FM6 v2: no bank, preset patches; MENU settings; RATCH) */
         }
         break;
       case CMD.GET: case CMD.SET: {
@@ -2545,8 +2575,8 @@ function makeMockDevice(opt = {}) {
         let rc = 0;
         if (op === 0) {                                /* begin: id, size, crc */
           const size = bkR(a, 2), crc = bkR(a, 7);
-          const ok = id <= 9 && (id < 8 || !opt.noFm6) && (id === 0 ? size === 3584 || size === 3388 : id === 1 ? size === BK_SETTINGS
-            : id <= 5 ? [0, 3584, 3388].includes(size) : id <= 7 ? size <= 3840 : id === 8 ? size === 0 || size === 3472
+          const ok = id <= 9 && (id < 8 || !opt.noFm6) && (id === 0 ? [3648, 3584, 3388].includes(size) : id === 1 ? size === BK_SETTINGS
+            : id <= 5 ? [0, 3648, 3584, 3388].includes(size) : id <= 7 ? size <= 3840 : id === 8 ? size === 0 || size === 3472
             : size === 0 || size === 3728);   /* (8: an older archive's bank, moved into the user presets; 9: their patches) */
           if (!ok || a.length !== 12) rc = 1;
           else { bk.snap = null; bk.put = { id, size, crc, buf: new Uint8Array(size), next: 0 }; }
@@ -2588,9 +2618,9 @@ function makeMockDevice(opt = {}) {
   function bkObject(id) {
     if (id >= 32) { const u = st.smp[id - 32]; return u.zones ? u.flash.slice(0, SMP.DATA_OFF + u.len) : new Uint8Array(0); }
     const had = bk.objs.get(id);
-    if (id === 0) return had || fill(3584, 1);
+    if (id === 0) return had || fill(3648, 1);
     if (id === 1) return had || fill(BK_SETTINGS, 2);
-    if (id <= 5) return st.slots[id - 2] ? had && had.length ? had : fill(3584, id) : new Uint8Array(0);
+    if (id <= 5) return st.slots[id - 2] ? had && had.length ? had : fill(3648, id) : new Uint8Array(0);
     if (id <= 7) { const used = st.bank.some((x, k) => x && (id === 6 ? k < 16 : k >= 16)); return used ? had && had.length ? had : fill(1200, id) : new Uint8Array(0); }
     if (id === 8) return new Uint8Array(0);
     return had || (st.bank.some((x) => x && x.fm6) ? fill(3728, 9) : new Uint8Array(0));
@@ -2761,7 +2791,7 @@ function devicePresetRows(info, names, preferences) {
 }
 
 /*PROTO-END*/
-  return { HDR, CMD, PUSH, UP, F, v14enc, v14dec, strEnc, frame, unframe, LANES, LANE_NOTE, LANE_OF, LANE_ALIAS, drumLane, stepLanes, stepAccents, hitsText, parseHits, hitsEnc, readHits, Reader, parse, upName, req, replyMatches, Link, NOTE_NAMES, noteName, parseNote, parseNotes, fmtValue, SMP, pack7, unpack7, CRC_TABLE, crc32, IMA_STEP, IMA_IDX, imaEncode, parseWav, resample, pyRound, normalize, FADE, takeSample, zoomView, autoTrim, rootFromName, buildSlot, LIB, paramKeys, sameKeys, remapParams, tailParams, patNorm, patternFromSteps, stepsFromPattern, patternUsed, gridFromSteps, cleanPatch, libraryFile, readLibraryFile, FLASH_OPT, bank, capturePatch, TRACK_OWN, P_CHORD, trackOwn, auditionPatch, startWatch, mixer, FM6, FM4, fromDigital, reservedFm4, PERC_SET, fromPerc, engineLabel, makeMockDevice, readDevicePreferences, aliasOf, divLength, enumShown, ENGINE_ORDER, engineOrder, devicePresetRows, MENU, MENU_TABS, readDeviceMenu };
+  return { HDR, CMD, PUSH, UP, F, v14enc, v14dec, strEnc, frame, unframe, LANES, LANE_NOTE, LANE_OF, LANE_ALIAS, drumLane, stepLanes, stepAccents, hitsText, parseHits, hitsEnc, readHits, Reader, parse, upName, req, replyMatches, Link, NOTE_NAMES, noteName, parseNote, parseNotes, fmtValue, SMP, pack7, unpack7, CRC_TABLE, crc32, IMA_STEP, IMA_IDX, imaEncode, parseWav, resample, pyRound, normalize, FADE, takeSample, zoomView, autoTrim, rootFromName, buildSlot, LIB, paramKeys, sameKeys, remapParams, tailParams, patNorm, patternFromSteps, stepsFromPattern, patternUsed, gridFromSteps, cleanPatch, libraryFile, readLibraryFile, FLASH_OPT, bank, capturePatch, TRACK_OWN, P_CHORD, P_LANES, trackOwn, auditionPatch, startWatch, mixer, FM6, FM4, fromDigital, reservedFm4, PERC_SET, fromPerc, engineLabel, makeMockDevice, readDevicePreferences, aliasOf, divLength, enumShown, ENGINE_ORDER, engineOrder, devicePresetRows, MENU, MENU_TABS, readDeviceMenu };
 })();
 /* ---- fm1backup.js ---- */
 const __m1 = (() => {
@@ -2961,7 +2991,7 @@ const isFelucca = (p) => /felucca/i.test(p.name || "") && p.state !== "disconnec
 const P = { LEVEL: 0, SLEN: 29 };
 /* the layouts this editor knows (P_COUNT, P_E0 with G_COUNT 27; editor.html knownLayout) */
 const knownLayout = (info) => info.gcount === 27 &&
-  [[91, 83], [89, 81], [69, 61], [57, 49]].some(([c, e]) => info.pcount === c && info.pe0 === e);
+  [[99, 91], [91, 83], [89, 81], [69, 61], [57, 49]].some(([c, e]) => info.pcount === c && info.pe0 === e);
 const chordIds = P_CHORD;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -3085,8 +3115,9 @@ class Device {
     for (let k = 0; k < n; k++) { if (k % 8 === 0) this.emit("progress", { what: "steps", n: k, total: n }); this.steps[k] = parse[CMD.STEP_GET](await this.rq(req.stepGet(k))); }
     if (this.info.motionMax) await this.readMotion();
   }
+  /* (1.1: the query with the kinds, op 7, so a lock stays one) */
   async readMotion() {
-    const m = parse[CMD.MOTION](await this.rq(req.motion(this.sel ?? 0)));
+    const m = parse[CMD.MOTION](await this.rq(req.motion(this.sel ?? 0, this.info.locks ? 7 : 0)));
     if (m.rc || m.track !== (this.sel ?? 0)) throw new Error("motionState");
     this.motion = m;
   }
@@ -3501,10 +3532,12 @@ class Device {
     });
   }
   reloadSteps() { return this.op(async () => { await this.loadSteps(); this.emit("steps", this); }); }
-  /* MOTION: op 1 on / off, 2 clear, 3 set an event ({step, param, value}), 4 delete one; -> rc (0 ok) */
+  /* MOTION: op 1 on / off, 2 clear, 3 set an event ({step, param, value}), 4 delete one; 1.1: 5 set a lock, 6 clear a
+     step's locks; -> rc (0 ok). With locks the reply is read again with the kinds (ops 1..4 reply without) */
   motionOp(op, arg) {
     return this.op(async () => {
-      const r = parse[CMD.MOTION](await this.rq(req.motion(this.sel ?? 0, op, arg)));
+      let r = parse[CMD.MOTION](await this.rq(req.motion(this.sel ?? 0, op, arg)));
+      if (!r.rc && this.info.locks && op < 5) r = parse[CMD.MOTION](await this.rq(req.motion(this.sel ?? 0, 7)));
       if (!r.rc && r.track === (this.sel ?? 0)) { this.motion = r; this.emit("motion", r); }
       return r.rc;
     });
@@ -4635,7 +4668,7 @@ const MENU_TAB_ICON = {
 })();
 /* ---- layout.js ---- */
 const __m9 = (() => {
-  const { P_CHORD } = __m0;
+  const { P_CHORD, P_LANES } = __m0;
   const { BY_LABEL, BY_WAVE, MOD_DST, MOD_SRC, SPECIAL } = __m8;
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
@@ -4651,7 +4684,8 @@ const __m9 = (() => {
 const LAYOUT = (pe0, engine) => [
   { t: "ENV", place: "sound", viz: "env", pages: [["ENV", 0, [1, 2, 3, 4]], ["ENV DEST", 0, [5, 6, 7, 8]]] },
   { t: "LFO", place: "sound", viz: "lfo", pages: [["LFO", 0, [9, 10, 11, 12]], ["LFO DEST", 0, [13, 14, 15, 16]]] },
-  { t: "EDIT", place: "sound", engine: true, pages: [["EDIT 1", 0, [pe0, pe0 + 1, pe0 + 2, pe0 + 3]], ["EDIT 2", 0, [pe0 + 4, pe0 + 5, pe0 + 6, pe0 + 7]]] },
+  { t: "EDIT", place: "sound", engine: true, pages: [["EDIT 1", 0, [pe0, pe0 + 1, pe0 + 2, pe0 + 3]], ["EDIT 2", 0, [pe0 + 4, pe0 + 5, pe0 + 6, pe0 + 7]],
+    ...(pe0 >= 91 && engine === "DRUM" ? [["LANES", 0, P_LANES.slice(0, 4)], ["LANES 2", 0, P_LANES.slice(4)]] : [])] },   /* lane levels 83..90 (1.1) */
   ...(pe0 >= 61 ? [{ t: "MOD", place: "sound", mod: 49 }] : []),
   ...(pe0 >= 81 && engine === "DIGITAL" ? [{ t: "OP ENV", place: "sound", pages: [   /* a FELUCCA_FM4=1 build only */
     ...[0, 1, 2, 3].map((k) => [`OP${k + 1}`, 0, [61 + 5 * k, 62 + 5 * k, 63 + 5 * k, 64 + 5 * k]]),
@@ -4937,8 +4971,11 @@ const __m12 = (() => {
 const TIMES = ["NOTE", "TIE", "REST"];
 /* what the device calls the recorded knob moves: AUTOMATION from 1.0.4, MOTION before (the protocol's name) */
 const autoName = (version) => (cmpVersion(version, "1.0.4") >= 0 ? "AUTOMATION" : "MOTION");
-/* the ids MOTION can record (EDITOR_PROTOCOL.md v7, the device's motion_param) */
-const MOTION_IDS = [...Array(17).keys(), 33, 34, 35, 36, 38, 39, 44, ...Array.from({ length: 20 }, (_, k) => 61 + k), ...Array.from({ length: 8 }, (_, k) => 83 + k)];
+/* the ids MOTION can record (EDITOR_PROTOCOL.md v7, the device's motion_param): 83 .. P_COUNT-1 are the engine's
+   (1.0.x) or the DRUM lane levels and the engine's (1.1: 83..90, 91..98); not the chord keys 81, 82 */
+const motionIds = (pcount = 91) => [...Array(17).keys(), 33, 34, 35, 36, 38, 39, 44, ...Array.from({ length: 20 }, (_, k) => 61 + k),
+  ...Array.from({ length: Math.max(0, pcount - 83) }, (_, k) => 83 + k)];
+const MOTION_IDS = motionIds(91);
 const EMPTY = { n: 0, notes: [0, 0, 0, 0], time: 2, flags: 0, vel: 0, hit: 0, acc: 0, chance: 100, ratchet: 1 };
 const stepOn = (s) => !!s && s.time === 0 && (s.n > 0 || (s.hit | 0) > 0);
 const notesText = (s) => s.notes.slice(0, s.n).map(noteName).join(" ");
@@ -5094,11 +5131,15 @@ function seqScreen(root, ui) {
     const evs = m.events.filter((e) => e.step === cur);
     const rows = evs.map((e) => {
       const d = dev.pdesc[e.param];
-      const r = d ? paramRow(d, e.value, (v, final) => { if (final) dev.motionOp(3, { ...e, value: v }); }, { icon: (v) => paramIcon(d, v) }) : null;
+      /* (a lock, 1.1: its value set as a lock again; op 3 would make it an automation event) */
+      const r = d ? paramRow(d, e.value, (v, final) => { if (final) dev.motionOp(e.lock ? 5 : 3, { ...e, value: v }); },
+        { icon: (v) => paramIcon(d, v), label: e.lock ? d.label + " · LOCK" : d.label }) : null;
       return el("div", { class: "evrow" }, r ? r.el : el("span", { text: `P${e.param}` }),
         el("button", { type: "button", class: "iconbtn", "aria-label": `${d ? d.label : e.param} ×`, onclick: () => dev.motionOp(4, e) }, ic("symbol_trash")));
     });
-    const can = MOTION_IDS.filter((id) => visible(dev.pdesc[id]) && !evs.some((e) => e.param === id));
+    /* (the DRUM lane levels, 1.1: offered on a DRUM track only, where they sound) */
+    const lane = (id) => dev.info.pe0 >= 91 && id >= 83 && id < dev.info.pe0, drum = dev.engineName() === "DRUM";
+    const can = motionIds(dev.info.pcount).filter((id) => visible(dev.pdesc[id]) && !evs.some((e) => e.param === id) && (!lane(id) || drum));
     const pick = el("select", { "aria-label": autoName(dev.info.version) }, ...can.map((id) => el("option", { value: id, text: dev.pdesc[id].label + (id >= dev.info.pe0 ? " · " + dev.engineName() : "") })));
     const add = el("button", { type: "button", class: "btn", disabled: !can.length || m.count >= m.max,
       onclick: () => { const id = +pick.value; dev.motionOp(3, { step: cur, param: id, value: dev.dump.p[id] }); } }, ic("control_add"), `${t("steps")} ${cur + 1}`);
@@ -5180,7 +5221,7 @@ function seqScreen(root, ui) {
     },
   };
 }
-  return { autoName, MOTION_IDS, stepOn, notesText, stepToggled, laneToggled, seqScreen };
+  return { autoName, motionIds, MOTION_IDS, stepOn, notesText, stepToggled, laneToggled, seqScreen };
 })();
 /* ---- mix.js ---- */
 const __m13 = (() => {

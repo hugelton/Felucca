@@ -52,6 +52,9 @@ a { color: inherit; }
   .breath .face.btn { fill: #aca592; }
   .breath .slit { fill: #a1a1a3; }
 }
+/* the DRUM grid's beats (hal/fm1_input.h fm1_led_mid): a steady level between the glow and lit, ~15 % (DIM LO ~10 %) */
+.mid .slit { fill: #9a9a9e; }
+.dimlo .mid .slit { fill: #8a8a8e; }
 .held .face { stroke: var(--lit); stroke-width: 3; }
 .latched .face { stroke: #79b8ff; stroke-width: 3; }
 .start { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px;
@@ -86,7 +89,7 @@ footer small { font-size: 11px; opacity: .8; }
 </p>
 
 <footer>
-  <small class="version">v1.0.5.2</small><br>
+  <small class="version">v1.1.5</small><br>
   Felucca by Leo Kuroshita, Hügelton Instruments · <a href="https://www.gnu.org/licenses/gpl-3.0.html">GPL-3.0</a> · browser build after charlesvestal's <a href="https://github.com/charlesvestal/fm1-x0x">X0X</a> · DotGothic16 font, <a href="fonts/OFL.txt">SIL OFL 1.1</a><br>
   <nav><a href="../installer/">Install</a><a href="../editor/">Editor</a><a href="https://github.com/hugelton/Felucca">Source</a></nav>
   <small>M-VAVE and FM-1 are trademarks of their respective owners. Felucca is not affiliated with or endorsed by them.</small>
@@ -368,7 +371,21 @@ function drawScreen(fb) {
   }
   ctx.putImageData(img, 0, 0);
 }
-function drawLights([litB, litK, dimB, dimK, dimLo = 0, brB = 0, brK = 0]) {
+// the power-on sweep (hal/fm1_led_anim.h): a level per LED, lit frames /64 (| 128: the glow under them), drawn as the
+// LED's share of lit between its dark (or glowing) colour and the lit one, mixed in linear light
+const lin = (h) => [1, 3, 5].map((i) => (parseInt(h.slice(i, i + 2), 16) / 255) ** 2.2);
+const ANIM = { btn: [lin("#3a3934"), lin("#3a3934"), lin("#fff4d6")], slit: [lin("#3a3a3c"), lin("#77777b"), lin("#ececee")] };
+function animFill(kind, q) {
+  const [dark, glow, lit] = ANIM[kind], s = Math.min(q & 127, 64) / 64, base = q & 128 ? glow : dark;
+  const c = base.map((v, i) => Math.round(255 * (v + (lit[i] - v) * s) ** (1 / 2.2)));
+  return `rgb(${c.join(",")})`;
+}
+function drawAnim(anim) {
+  for (const b of buttons) b.g.querySelector(".face").style.fill = anim ? animFill("btn", anim[b.bit]) : "";
+  keys.forEach((k, i) => { k.g.querySelector(".slit").style.fill = anim ? animFill("slit", anim[14 + i]) : ""; });
+}
+function drawLights([litB, litK, dimB, dimK, dimLo = 0, brB = 0, brK = 0, midK = 0], anim = null) {
+  drawAnim(anim);
   document.documentElement.classList.toggle("dimlo", !!dimLo);   // (the breath's lower peak)
   for (const b of buttons) {
     const bit = 1 << b.bit, green = b.bit === B.PLAY && (litB & (1 << PLAY_GREEN));
@@ -381,6 +398,7 @@ function drawLights([litB, litK, dimB, dimK, dimLo = 0, brB = 0, brK = 0]) {
     k.g.classList.toggle("lit", !!(litK & (1 << i)));
     k.g.classList.toggle("dim", !!(dimK & (1 << i)));
     k.g.classList.toggle("breath", !!(brK & (1 << i)));
+    k.g.classList.toggle("mid", !!(midK & (1 << i)));
   });
 }
 
@@ -445,7 +463,7 @@ async function switchOn() {
         else if (m.type === "error") rej(new Error(m.message));
         else if (m.type === "frame") {
           if (m.fb) drawScreen(m.fb);
-          if (m.leds) drawLights(lastLeds = m.leds);
+          if (m.leds) drawLights(lastLeds = m.leds, m.anim);
           if (m.sectors && !saveFlash(m.sectors) && !warned) {
             warned = true;
             console.warn("Felucca: this browser does not keep the saves; they last until the page closes.");
