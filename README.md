@@ -102,7 +102,7 @@ Multi-engine synthesizer firmware for the M-VAVE FM-1. Please report what you fi
   the keys send on the track's channel; pitch bend, sustain, panic; clock from internal, USB or TRS. MIDI CCs set
   track parameters: 5 GLIDE, 7 LEVEL, 10 PAN, 71 resonance, 72 / 73 / 75 release / attack / decay, 74 brightness,
   91 / 93 / 94 the reverb, chorus and delay sends. **MIDI LEARN** (GLO + D4) sets up to 16 more CCs of your
-  controller to any knob's parameter of any track, on the device
+  controller to any knob's parameter of any track, on the device; Program Change selects engine presets, drum kits (DRUM) or factory patch slots (FM6)
 - **Web:** editor for every parameter (with a 6-operator FM patch editor that also sends a whole 32-voice bank),
   step grid, mixer, preset library, sample upload and recording with trim, the MENU settings; full backup and restore
   (everything but the FM6 voice bank: keep its .syx file);
