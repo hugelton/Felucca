@@ -106,6 +106,12 @@
 #                   GRAIN / SLICE). Longer runs: build/host/asan/fuzz_ed 300000 7 (iterations, seed), the same for the others.
 #                   UBSan leaves out the DSP's intended wraps (signed overflow, shifts) and the XIP rebase of a user zone's
 #                   offset (bounds, object-size, pointer-overflow: correct on the device's flat flash, not in C's model).
+# ADPCM (tests/adpcm_test.c, built with FELUCCA_ADPCM=1: off by default): the voice (src/adpcm_dsp.c) sample for
+#                   sample against snes_spc's SPC_DSP.cpp (tests/adpcm_ref.cpp, when SNES_SPC points at a checkout):
+#                   BRR, Gaussian interpolation, ADSR, GAIN, noise, the echo (FIR, feedback); its rate countdowns
+#                   against the original's counter; the presets in the mix (peak, clipping, voices freed, the echo
+#                   idle), the pitch register; the echo line in PHYS's memory (either engine after the other = from
+#                   boot); demos in build/adpcm_demo/.
 # Change baseline entries only for reviewed, intentional differences in sound or cost;
 # retain every unaffected golden / CPU / target entry. VERBOSE=1: every render.
 set -e
@@ -254,6 +260,17 @@ if [ -f build/gen/felucca_tables.h ]; then
         run "PHYS: the fixed-point models against DaisySP's float originals (mode frequencies, decays, Svf)" "$OUT/phys_ref"
     else
         echo "== skip PHYS reference test (no DaisySP: set DAISYSP to a checkout)"
+    fi
+    S=${SNES_SPC:-vendor/snes_spc}/snes_spc
+    if [ -f "$S/SPC_DSP.cpp" ] && command -v c++ >/dev/null 2>&1; then
+        c++ -O2 -w -I"$S" -Ibuild/gen -Itests -o "$OUT/adpcm_ref" tests/adpcm_ref.cpp
+        "$OUT/adpcm_ref" "$OUT/adpcm_ref.bin" >/dev/null
+        $CC -O2 -w -DFELUCCA_ADPCM=1 -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/adpcm_test" tests/adpcm_test.c -lm
+        mkdir -p build/adpcm_demo
+        run "ADPCM (off by default): the voice bit for bit against snes_spc, counters, presets, pitch, demos" \
+            "$OUT/adpcm_test" "$OUT/adpcm_ref.bin" build/adpcm_demo
+    else
+        echo "== skip ADPCM test (no snes_spc: set SNES_SPC to a checkout)"
     fi
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/drum_test" tests/drum_test.c -lm
     mkdir -p build/drum_demo

@@ -22,6 +22,9 @@
 #if FELUCCA_SLICE
 #include "eng_slice.c"
 #endif
+#if FELUCCA_ADPCM
+#include "eng_adpcm.c"          /* ADPCM: BRR waves and an FIR echo, ported from snes_spc (LGPL-2.1-or-later) */
+#endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder */
 static const engine_t *const ENGINES[NENGINES] = {
@@ -44,6 +47,9 @@ static const engine_t *const ENGINES[NENGINES] = {
     &ENG_FM6,                    /* 12 (ENGI_FM6) */
 #if FELUCCA_SLICE
     &ENG_SLICE,                  /* 13 (FELUCCA_SLICE=0 builds without it) */
+#endif
+#if FELUCCA_ADPCM
+    &ENG_ADPCM,                  /* 14 (FELUCCA_ADPCM=1 builds it: off by default) */
 #endif
 };
 
@@ -82,6 +88,9 @@ static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
 #endif
     2, 3, 4, 5, 6, 7, 8, 9,      /* PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS */
     11,                          /* NOISE */
+#if FELUCCA_ADPCM
+    14,                          /* ADPCM */
+#endif
 #if FELUCCA_SLICE
     13,                          /* SLICE */
 #endif

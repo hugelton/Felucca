@@ -102,7 +102,8 @@ def generate():
             [tools / "gen_ui_palettes.py", GEN / "ui_palettes.h"],
             [tools / "gen_tables.py", GEN / "felucca_tables.h"],
             [tools / "gen_fm6_patches.py", GEN / "felucca_fm6.h"],
-            [tools / "gen_samples.py", GEN / "felucca_samples.h"]]
+            [tools / "gen_samples.py", GEN / "felucca_samples.h"],
+            [tools / "gen_adpcm.py", GEN / "felucca_adpcm.h"]]
     procs = [subprocess.Popen([sys.executable, *map(str, c)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True) for c in cmds]
     failed = []
@@ -180,7 +181,7 @@ def build_app():
     flags = [*CFLAGS, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
     for flag in ("FELUCCA_FLASH", "FELUCCA_OTA", "FELUCCA_OTA_DRYRUN", "FELUCCA_OTA_RAMONLY", "FELUCCA_CDC",
                  "FELUCCA_UART", "FELUCCA_UAC", "FELUCCA_UAC_TONE", "FELUCCA_UAC_48K", "FELUCCA_ICONS", "FELUCCA_SLICE", "FELUCCA_FM4",
-                 "FELUCCA_CDC_DEFAULT"):
+                 "FELUCCA_CDC_DEFAULT", "FELUCCA_ADPCM"):
         v = os.environ.get(flag)    # unset: the default in firmware/src/felucca.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
