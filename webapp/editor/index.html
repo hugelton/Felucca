@@ -8,7 +8,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Felucca Editor</title>
 <link rel="icon" href="data:,">
-<meta name="felucca-release" content="1.4.1">
+<meta name="felucca-release" content="1.5">
   <meta name="felucca-try" content="1">
 <style>
 /* SPDX-License-Identifier: GPL-3.0-only
@@ -431,6 +431,9 @@ input.text.num { width: 6.5em; min-height: 32px; background: var(--surf); }
 .songrow .n { font-size: .75rem; font-weight: 600; color: var(--mid); text-align: center; }
 .songrow.at .n { color: var(--accent); }
 .songrow.at .pick b { color: var(--accent); }
+/* MIDI LEARN (1.5): CC -> track and parameter, a delete; the add row */
+.learnrow { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.learnadd { display: grid; grid-template-columns: 64px 64px minmax(0, 1fr) auto; gap: 6px; }
 /* 1.4: a section, a slot per track (T1..T4) over its REPS */
 .songrow.sect { grid-template-columns: 20px minmax(0, 1fr) auto; }
 .songrow.sect .lanes { grid-column: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
@@ -555,12 +558,19 @@ const __m0 = (() => {
 //   project's TUNE, global 3: kind 1, -50..50 "ct"; tab AUDIO), appended (INFO 4E 01 23); the tab MIDI came in before
 //   SYSTEM (SYSTEM's index 3 -> 4). Both set the global as SET does (rc 0: the music's, no settings record)
 // - 1.3: MENU item 23 HOME (SCOPE, TRACKS: what HOME shows under its cards; DISPLAY), appended (INFO 4E 01 24)
+// - 1.5: HOME gained LEVELS (value 2, appended: the TRACKS rows, KNOB 1..4 the LEVEL of T1..T4)
+// - 1.5: MENU item 24 HELP (OFF, ON: a hint per page and layer on the device; SYSTEM), appended (INFO 4E 01 25)
 // - 1.2: ARP MODE (P_AMODE) gained DNUP UP+8 CONV DIVG PINKY THUMB WALK CHORD (values 7..14, appended)
 // - 1.2 (FUN10): P_COUNT 103, P_E0 95: LFO 2 SYNC TRIG POL (91..93) and QUANTIZE (94, the track's) before the engine
 //   values; MOTION holds 128 records (ops 1..7 reply as before: max 64, at most 64 listed; op 8 lists all, count / max
 //   as two 7-bit bytes); a project object is 3840 bytes (FUN10). (Not mocked: the step's NUDGE byte, INFO 41 / 54)
 // - FUN10, before its release: P_COUNT 104, P_E0 96: SPRD (95, SPREAD, #148, 0..127 PCT, 0 = as before) before the
 //   engine values; the matrix's SRC gained S&H SLEW (9, 10), DST DEPTH (20), ANALOG's WAVE SYNC SUB (5, 6): appended
+// - 1.5: P_COUNT 111, P_E0 103 (FUN10 as it was): the INSERT, INSRT (96, OFF SOFT HARD FOLD FUZZ CRUSH PHASR FLANG CHOR)
+//   INS A..C (97..99, their meaning by INSRT: params.c ins_desc) MIX (100), then TYPE (101, ANALOG's
+//   filter LP BP HP, #104) and ESYNC (102, ENV SYNC OFF ON, #175: ATK DEC REL as note values, params.c ESYNC_NAMES),
+//   before the engine values; MOTION records SPRD (95) and 96..100 as the firmware does (not TYPE, ESYNC); FUN10 of
+//   104 load by count
 /*PROTO-BEGIN*/
 /* ---------------------------------------------------------------- protocol --- */
 const HDR = [0x7D, 0x46, 0x4C];
@@ -573,7 +583,7 @@ const CMD = { INFO: 1, GET: 2, SET: 3, DUMP: 4, DESC: 5, STEP_GET: 6, STEP_SET: 
   UI_STATE: 34, UI_SET: 35, UI_PALETTES: 36, FAV_GET: 37, FAV_SET: 38,
   MOTION: 64, BACKUP_LIST: 65, BACKUP_GET: 66, BACKUP_PUT: 67,
   FM6_GET: 68, FM6_PUT: 69, FM6_LIST: 70, FM6_ERASE: 71, MENU_DESC: 72, MENU_SET: 73,
-  FM6B_BEGIN: 74, FM6B_WRITE: 75, FM6B_END: 76, FM6B_LIST: 77 };
+  FM6B_BEGIN: 74, FM6B_WRITE: 75, FM6B_END: 76, FM6B_LIST: 77, LEARN_GET: 78, LEARN_SET: 79 };
 /* frames the device sends on its own (while WATCH is on); never replies */
 const PUSH = new Set([CMD.CHANGED, CMD.RELOAD, CMD.STEP_CHANGED, CMD.TRACK_CHANGED]);
 /* user preset bank: name 1..12 printable ASCII, a 16-step pattern of (note, flags 1 acc 2 slide 4 tie) */
@@ -687,12 +697,13 @@ const parse = {
       /* the tagged blocks from 53 01 on, walked by their known lengths (an unknown tag ends the walk): 1.2's 57 01 n =
          SONG sections with a slot per track (n lanes; SONG ops 4..7) */
       /* (1.4.1's 56 01 n: FM6's voice bank, n voices: cmds 74..77, SLOT 9.. = B1..Bn) */
-      const LEN = { 0x53: 1, 0x50: 1, 0x4E: 1, 0x52: 1, 0x4C: 1, 0x41: 2, 0x54: 1, 0x57: 1, 0x56: 1 };
+      const LEN = { 0x53: 1, 0x50: 1, 0x4E: 1, 0x52: 1, 0x4C: 1, 0x41: 2, 0x54: 1, 0x57: 1, 0x56: 1, 0x43: 1 };   /* (1.5's 43 01 n: MIDI LEARN, cmds 78, 79) */
       for (let q = p + 4; q + 2 < trailer.length && trailer[q + 1] === 1 && LEN[trailer[q]]; q += 2 + LEN[trailer[q]]) {
         if (trailer[q] === 0x57) o.songLanes = trailer[q + 2];
         if (trailer[q] === 0x41 && q + 3 < trailer.length) o.motionCap = trailer[q + 2] | trailer[q + 3] << 7;   /* 1.2: 128 */
         if (trailer[q] === 0x54) o.nudge = trailer[q + 2];                                                      /* 1.2: 16 */
         if (trailer[q] === 0x56) o.fm6Bank = trailer[q + 2];                                                    /* 1.4.1: 32 */
+        if (trailer[q] === 0x43) o.midiLearn = trailer[q + 2];                                                  /* 1.5: 16 */
       }
     }
     o.menuCount = o.menuCount || 0;
@@ -700,6 +711,7 @@ const parse = {
     o.motionCap = o.motionCap || 0;               /* 0: MOTION ops 0..7 only (64 records); else op 8 lists them all */
     o.nudge = o.nudge || 0;                       /* 0: no nudge byte in steps */
     o.fm6Bank = o.fm6Bank || 0;                   /* FM6's voice bank (1.4.1): 0 none */
+    o.midiLearn = o.midiLearn || 0;               /* MIDI LEARN's entries (1.5): 0 none */
     o.categories = o.motionCap > 0;               /* user preset categories (1.2 / 1.4, with the same tags) */
     return o;
   },
@@ -850,6 +862,17 @@ const parse = {
     for (let i = 0; i < o.n; i++) { const used = r.b(); o.voices.push({ used: !!used, name: r.s() }); }
     return o;
   },
+  /* MIDI LEARN's map (1.5, info.midiLearn): n, then per entry {used, cc, track, id} (id: P_*, P_E0 from INFO);
+     LEARN_SET: rc (0 saved, 1 arguments, 3 RAM only, 4 saved at STOP, 5 full), then the map */
+  [CMD.LEARN_GET](a) {
+    const o = { n: a[0] ?? 0, entries: [] };
+    for (let i = 0; i < o.n; i++) {
+      const e = a.slice(1 + 4 * i, 5 + 4 * i);
+      o.entries.push({ used: !!e[0], cc: e[1], track: e[2], id: e[3] });
+    }
+    return o;
+  },
+  [CMD.LEARN_SET](a) { return { rc: a[0], ...parse[CMD.LEARN_GET](a.slice(1)) }; },
   /* MENU settings: kind 0 an enum (one name per value min..max), 1 a number with a unit; id 127: no item at index.
      1.0.5: then the item's tab on the device (index, name; tab -1 / "" from older firmware); a kind this editor does
      not know: no tab read (its bytes are not known) */
@@ -953,6 +976,11 @@ const req = {
     const c = String(name || "").toUpperCase().charCodeAt(i);
     return c >= 32 && c <= 126 ? c : 32; }), ...[0, 7, 14, 21, 28].map((k) => (crc >>> k) & 0x7F)]],
   fm6bList: () => [CMD.FM6B_LIST, []],
+  /* MIDI LEARN's map (info.midiLearn): read it; learn cc -> parameter id of track; clear a CC; clear all */
+  learnGet: () => [CMD.LEARN_GET, []],
+  learnSet: (cc, track, id) => [CMD.LEARN_SET, [0, cc & 0x7F, track & 0x7F, id & 0x7F]],
+  learnClear: (cc) => [CMD.LEARN_SET, [1, cc & 0x7F]],
+  learnClearAll: () => [CMD.LEARN_SET, [2]],
   /* MENU settings (firmware with info.menuCount) */
   menuDesc: (i) => [CMD.MENU_DESC, [i & 0x7F]],
   menuSet: (id, v) => [CMD.MENU_SET, [id & 0x7F, ...v14enc(v)]],
@@ -1805,6 +1833,18 @@ const fm6Bank = {
   list: async (rq) => parse[CMD.FM6B_LIST](await rq(req.fm6bList())),
 };
 
+/* MIDI LEARN (1.5, EDITOR_PROTOCOL.md "MIDI LEARN"; firmware with info.midiLearn): CCs set to parameters of tracks.
+   The CCs the device never learns (bank select, MODW, RPN / NRPN data, EXPR, the pedal, the channel messages) */
+const midiLearn = {
+  never: (cc) => cc === 0 || cc === 1 || cc === 6 || cc === 11 || cc === 32 || cc === 38 || cc === 64 ||
+    (cc >= 96 && cc <= 101) || cc >= 120,
+  /* -> {n, entries: [{used, cc, track, id}]} */
+  list: async (rq) => parse[CMD.LEARN_GET](await rq(req.learnGet())),
+  /* -> {rc, n, entries} (the map after it) */
+  set: async (rq, cc, track, id) => parse[CMD.LEARN_SET](await rq(req.learnSet(cc, track, id))),
+  clear: async (rq, cc) => parse[CMD.LEARN_SET](await rq(cc === undefined ? req.learnClearAll() : req.learnClear(cc))),
+};
+
 /* ----------------------------------------------------------------- DIGITAL --- */
 /* DIGITAL (engine 1, four-operator FM) was replaced by FM6 (1.0): the firmware keeps engine 1 reserved (its name
    "-"; a FELUCCA_FM4=1 build has DIGITAL back) and turns every DIGITAL sound into an FM6 one with a patch of its own
@@ -2025,7 +2065,9 @@ const MENU = [
   { id: 21, name: "MIDI IN", names: ["CH1-4", "SEL", "CH5-8", "CH9-12", "CH13-16"], def: 0, tab: 3, g: 14 },
   { id: 22, name: "TUNE", kind: 1, min: -50, max: 50, unit: "ct", names: [], def: 0, tab: 2, g: 3 },
   /* 1.3 (Discussions #112, #134): HOME under its cards: the scope (as before) or the four tracks as rows */
-  { id: 23, name: "HOME", names: ["SCOPE", "TRACKS"], def: 0, tab: 0 },
+  { id: 23, name: "HOME", names: ["SCOPE", "TRACKS", "LEVELS"], def: 0, tab: 0 },  // (1.5: LEVELS, #134)
+  /* 1.5 (Discussion #156): a short hint per page (in the footer when it opens) and per layer (under its map) */
+  { id: 24, name: "HELP", names: ["OFF", "ON"], def: 0, tab: 4 },
 ];
 /* the MENU settings the device offers, in its menu's order (firmware without them: []); rq as the other readers */
 async function readDeviceMenu(rq, info) {
@@ -2178,8 +2220,11 @@ function makeMockDevice(opt = {}) {
   for (const l of ["KICK", "SNARE", "CLAP", "HATCL", "HATOP", "TOM", "RIM", "BELL"]) TP.push(D(l, F.PCT, 0, 127, 127));   /* 83..90: DRUM lane levels */
   TP.push(E("SYNC", ["OFF", "4BAR", "2BAR", "1/1", "1/2", "1/4", "1/8", "8T", "1/16", "16T", "1/32"], 0),   /* 1.2: LFO 2 (91..93) */
     E("TRIG", ["NOTE", "FREE"], 0), E("POL", ["BI", "UNI"], 0), E("QNTZ", ["OFF", "ON"], 1),   /* and QUANTIZE (94) */
-    D("SPRD", F.PCT, 0, 127, 0));   /* SPREAD (95, #148) */
-  const P_COUNT = 104, G_COUNT = 27, NSTEP = 64, P_E0 = 96, G_ENGSEL = 20, P_SLCR = 45;
+    D("SPRD", F.PCT, 0, 127, 0),   /* SPREAD (95, #148) */
+    E("INSRT", ["OFF", "SOFT", "HARD", "FOLD", "FUZZ", "CRUSH", "PHASR", "FLANG", "CHOR"], 0),   /* 1.5: the INSERT (96..100) */
+    D("INS A", F.PCT, 0, 127, 64), D("INS B", F.PCT, 0, 127, 96), D("INS C", F.PCT, 0, 127, 96), D("MIX", F.PCT, 0, 127, 127),
+    E("TYPE", ["LP", "BP", "HP"], 0), E("ESYNC", ["OFF", "ON"], 0));   /* 1.5: ANALOG's filter TYPE (101, #104), ENV SYNC (102, #175) */
+  const P_COUNT = 111, G_COUNT = 27, NSTEP = 64, P_E0 = 103, G_ENGSEL = 20, P_SLCR = 45;
   const MOTION_MAX = 128;                           /* motion records shared by the tracks (1.2; 64 before) */
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const enumOrig = (d, v) => d.fmt === F.ENUM && d.names ? aliasOf(d.names, v - d.min) + d.min : v;   /* params.c enum_orig */
@@ -2201,6 +2246,7 @@ function makeMockDevice(opt = {}) {
     favorites: Array.from({ length: ENG.length + 1 }, () => []),
     menu: MENU.map((m) => m.def),                   /* the MENU settings' values (COLOR: palette) */
     vbank: { valid: false, name: "", voices: new Array(32).fill(null), tx: null },   /* FM6's voice bank (fm6_vbank.c) */
+    learn: new Array(16).fill(null),                /* MIDI LEARN's map (midi_control.c): {cc, track, id} */
     watch: false, v4: false, lastReq: 0,
   };
   for (const k of ["engine", "preset", "p", "step"]) {
@@ -2471,8 +2517,8 @@ function makeMockDevice(opt = {}) {
         else if (a[1] === 3 || a[1] === 4 || a[1] === 5) {
           /* src/motion.c motion_param / motion_set_event: a step < 64, a parameter that can be recorded, its range */
           const id = a[3], rec = id < P_COUNT && (id <= 16 || (id >= 33 && id <= 36) || id === 38 || id === 39 || id === 44
-            || (id >= 61 && id <= 80) || (id >= P_LANES[0] && id <= P_LANES[7]) || id >= 95);   /* (the lane levels,
-                                                                     * SPREAD, E0..E7; not 1.2's LFO 2 / QUANTIZE 91..94) */
+            || (id >= 61 && id <= 80) || (id >= P_LANES[0] && id <= P_LANES[7]) || (id >= 95 && id <= 100) || id >= P_E0);   /* (the lane levels, SPRD 95, 1.5's INSERT 96..100, E0..E7;
+                                                                     * not LFO 2 / QUANTIZE 91..94, nor 1.5's TYPE / ESYNC 101, 102) */
           const at = m.events.findIndex(e => e.step === a[2] && e.param === a[3]);
           if (a[2] >= NSTEP || !rec) rc = 1;
           else if (a[1] === 4) { if (at >= 0) m.events.splice(at, 1); }
@@ -2501,7 +2547,7 @@ function makeMockDevice(opt = {}) {
           b(16);
           if (st.uiCaps) { b(0x55); b(1); b(st.uiCaps); b(0x4d); b(1); b(64); b(1); if (!opt.noBackup) { b(0x42); b(1); b(3); } if (!opt.noFm6) { b(0x46); b(1); b(FM6.FACTORY_PK.length); b(0); }
             if (syncCaps()) { b(0x53); b(1); b(syncCaps()); if (!opt.noFm6) { b(0x50); b(1); b(3); if (!opt.noMenu) { b(0x4E); b(1); b(MENU.length); } } if (ratchetOn()) { b(0x52); b(1); b(4); if (locksOn()) { b(0x4C); b(1); b(1);
-              if (capOn()) { b(0x41); b(1); b(0); b(1); b(0x54); b(1); b(16); if (!opt.noLanes) { b(0x57); b(1); b(NTRK); if (!opt.noVbank) { b(0x56); b(1); b(32); } } } } } } }   /* (FM6 v2: no bank, preset
+              if (capOn()) { b(0x41); b(1); b(0); b(1); b(0x54); b(1); b(16); if (!opt.noLanes) { b(0x57); b(1); b(NTRK); if (!opt.noVbank) { b(0x56); b(1); b(32); if (!opt.noLearn) { b(0x43); b(1); b(16); } } } } } } } }   /* (FM6 v2: no bank, preset
               patches; MENU settings; RATCH; locks; 1.2: 128 records, nudge, song lanes) */
         }
         break;
@@ -2628,6 +2674,26 @@ function makeMockDevice(opt = {}) {
           b(32); b(vb.valid ? 1 : 0); s(vb.valid ? vb.name : "");
           for (const pk of vb.voices) { b(pk ? 1 : 0); s(pk ? FM6.name(FM6.unpack(pk)) : ""); }
         }
+        break;
+      }
+      case CMD.LEARN_GET: case CMD.LEARN_SET: {      /* editor_learn.c, midi_learn.c ml_learn */
+        if (opt.noFm6 || opt.noVbank || opt.noLearn || !st.uiCaps) return null;
+        const L = st.learn, drop = (f) => L.forEach((e, i) => { if (e && f(e)) L[i] = null; });
+        if (cmd === CMD.LEARN_GET) {
+          if (a.length) return null;
+        } else if (a.length === 4 && a[0] === 0) {
+          const [, cc, track, id] = a;
+          if (midiLearn.never(cc) || track >= NTRK || id >= P_COUNT) b(1);
+          else {
+            drop((e) => e.cc === cc || (e.track === track && e.id === id));
+            const i = L.indexOf(null);
+            if (i < 0) b(5); else { L[i] = { cc, track, id }; b(0); }
+          }
+        } else if (a.length === 2 && a[0] === 1) { drop((e) => e.cc === a[1]); b(0); }
+        else if (a.length === 1 && a[0] === 2) { L.fill(null); b(0); }
+        else b(1);
+        b(16);
+        for (const e of L) { if (e) { b(1); b(e.cc); b(e.track); b(e.id); } else { b(0); b(0); b(0); b(0); } }
         break;
       }
       case CMD.PRESET:
@@ -2972,7 +3038,7 @@ function devicePresetRows(info, names, preferences) {
 }
 
 /*PROTO-END*/
-  return { HDR, CMD, PUSH, UP, F, v14enc, v14dec, strEnc, frame, unframe, LANES, LANE_NOTE, LANE_OF, LANE_ALIAS, drumLane, stepLanes, stepAccents, hitsText, parseHits, hitsEnc, readHits, Reader, parse, upName, req, replyMatches, Link, NOTE_NAMES, noteName, parseNote, parseNotes, fmtValue, SMP, pack7, unpack7, CRC_TABLE, crc32, IMA_STEP, IMA_IDX, imaEncode, parseWav, resample, pyRound, normalize, FADE, takeSample, zoomView, autoTrim, rootFromName, buildSlot, LIB, paramKeys, sameKeys, remapParams, tailParams, patNorm, patternFromSteps, stepsFromPattern, patternUsed, gridFromSteps, cleanPatch, libraryFile, readLibraryFile, FLASH_OPT, bank, capturePatch, TRACK_OWN, P_CHORD, P_LANES, trackOwn, auditionPatch, startWatch, mixer, FM6, fm6Bank, FM4, CATEGORIES, fromDigital, reservedFm4, PERC_SET, fromPerc, engineLabel, makeMockDevice, parseMotionAll, readDevicePreferences, aliasOf, divLength, enumShown, ENGINE_ORDER, engineOrder, devicePresetRows, MENU, MENU_TABS, readDeviceMenu };
+  return { HDR, CMD, PUSH, UP, F, v14enc, v14dec, strEnc, frame, unframe, LANES, LANE_NOTE, LANE_OF, LANE_ALIAS, drumLane, stepLanes, stepAccents, hitsText, parseHits, hitsEnc, readHits, Reader, parse, upName, req, replyMatches, Link, NOTE_NAMES, noteName, parseNote, parseNotes, fmtValue, SMP, pack7, unpack7, CRC_TABLE, crc32, IMA_STEP, IMA_IDX, imaEncode, parseWav, resample, pyRound, normalize, FADE, takeSample, zoomView, autoTrim, rootFromName, buildSlot, LIB, paramKeys, sameKeys, remapParams, tailParams, patNorm, patternFromSteps, stepsFromPattern, patternUsed, gridFromSteps, cleanPatch, libraryFile, readLibraryFile, FLASH_OPT, bank, capturePatch, TRACK_OWN, P_CHORD, P_LANES, trackOwn, auditionPatch, startWatch, mixer, FM6, fm6Bank, midiLearn, FM4, CATEGORIES, fromDigital, reservedFm4, PERC_SET, fromPerc, engineLabel, makeMockDevice, parseMotionAll, readDevicePreferences, aliasOf, divLength, enumShown, ENGINE_ORDER, engineOrder, devicePresetRows, MENU, MENU_TABS, readDeviceMenu };
 })();
 /* ---- fm1backup.js ---- */
 const __m1 = (() => {
@@ -3156,7 +3222,7 @@ class BackupConnection {
 /* ---- device.js ---- */
 const __m2 = (() => {
   const { captureBackup, readBackup, restoreBackup } = __m1;
-  const { CMD, F, FLASH_OPT, FM6, fm6Bank, Link, parseMotionAll, P_CHORD, SMP, auditionPatch, bank, capturePatch, fromDigital, mixer, parse, paramKeys, readDeviceMenu, readDevicePreferences, req, reservedFm4, startWatch, upName } = __m0;
+  const { CMD, F, FLASH_OPT, FM6, fm6Bank, midiLearn, Link, parseMotionAll, P_CHORD, SMP, auditionPatch, bank, capturePatch, fromDigital, mixer, parse, paramKeys, readDeviceMenu, readDevicePreferences, req, reservedFm4, startWatch, upName } = __m0;
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
 //
@@ -3172,7 +3238,7 @@ const isFelucca = (p) => /felucca/i.test(p.name || "") && p.state !== "disconnec
 const P = { LEVEL: 0, SLEN: 29 };
 /* the layouts this editor knows (P_COUNT, P_E0 with G_COUNT 27; editor.html knownLayout) */
 const knownLayout = (info) => info.gcount === 27 &&
-  [[104, 96], [99, 91], [91, 83], [89, 81], [69, 61], [57, 49]].some(([c, e]) => info.pcount === c && info.pe0 === e);
+  [[111, 103], [104, 96], [99, 91], [91, 83], [89, 81], [69, 61], [57, 49]].some(([c, e]) => info.pcount === c && info.pe0 === e);
 const chordIds = P_CHORD;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -3637,8 +3703,10 @@ class Device {
   backupCheck(text) { return readBackup(text); }
   /* a backup this device cannot take back: a 1.4 project (3840 bytes, FUN10) on firmware before it (no INFO 41 01:
      it would answer rc 1 and keep nothing of that object) */
+  /* (and a 1.5 project, FUN10 of 111 parameters, byte 66, on 1.2 .. 1.4: more parameters than this device has) */
   backupTooNew(archive) {
-    return !this.info.motionCap && (archive.objects || []).some((o) => o.id <= 5 && o.id !== 1 && o.size === 3840);
+    const proj = (archive.objects || []).filter((o) => o.id <= 5 && o.id !== 1 && o.size === 3840);
+    return (!this.info.motionCap && proj.length > 0) || proj.some((o) => o.bytes && String.fromCharCode(...o.bytes.slice(0, 4)) === "FUNA" && o.bytes[66] > this.info.pcount);
   }
   backupRestore(archive, onProgress) {
     if (this.backupTooNew(archive)) { this.emit("error", new Error("backupNewer")); return Promise.resolve(false); }
@@ -3658,6 +3726,25 @@ class Device {
       const r = parse[CMD.FM6_GET](await this.rq(req.fm6Get(FM6.TARGET.TRACK, k)));
       if (r.rc) { const e = new Error(`fm6 rc ${r.rc}`); e.code = "fm6"; e.rc = r.rc; throw e; }
       return r.packed;
+    });
+  }
+  /* MIDI LEARN (1.5, INFO 43 01 16): the device's CC map, not pushed: read when settings show. -> this.learn
+     {n, entries: [{used, cc, track, id}]} */
+  async readLearn() {
+    if (!this.info.midiLearn) { this.learn = null; return null; }
+    try { this.learn = await midiLearn.list((r, o) => this.rq(r, o)); } catch (e) { if (e.message === "closed") throw e; this.learn = null; }
+    this.emit("learn", this.learn);
+    return this.learn;
+  }
+  /* cc to track's parameter id, or (id null) cc cleared, or (cc null) every CC cleared -> rc (0 saved; 1 refused,
+     3 not saved, 4 saved at STOP, 5 sixteen learned already) */
+  learnSet(cc, track, id) {
+    return this.op(async () => {
+      const rq = (r, o) => this.rq(r, o);
+      const r = cc == null ? await midiLearn.clear(rq) : id == null ? await midiLearn.clear(rq, cc) : await midiLearn.set(rq, cc, track, id);
+      this.learn = { n: r.n, entries: r.entries };
+      this.emit("learn", this.learn);
+      return r.rc;
     });
   }
   /* FM6's voice bank on the device (1.4.1, INFO 56 01 32): FM6B_LIST -> this.fm6bank {n, valid, name, voices} */
@@ -3787,7 +3874,7 @@ class Device {
   async readMenu() {
     if (!this.info || !this.info.menuCount) return null;
     await this.idle();
-    const items = await this.op(() => readDeviceMenu((r, o) => this.rq(r, o), this.info));
+    const items = await this.op(async () => { const x = await readDeviceMenu((r, o) => this.rq(r, o), this.info); if (this.info.midiLearn) await this.readLearn(); return x; });
     if (items) { this.menu = items; this.emit("menu", items); }
     return this.menu;
   }
@@ -4448,7 +4535,7 @@ const TEXT = {
     fm6OtherMaker: "another manufacturer's SysEx", fm6Universal: "universal SysEx",
     installer: "Installer", classic: "Classic editor", update: "Update", continue: "Continue",
     files: "Files", recInput: "Input", recFull: "The slot is full", recDenied: "No input:", recSilent: "Nothing came in",
-    backupNewer: "A backup from newer firmware: update the FM-1 first.",
+    backupNewer: "A backup from newer firmware: update the FM-1 first.", learnFull: "16 CCs learned: delete one first.", pianoBuiltIn: "Built in on 1.5", clearAll: "Clear all",
     bankQ: "Send the bank {0} to the FM-1? It is not part of the backup: keep the .syx file.", bankSent: "The FM-1 holds the bank {0}: SLOT B1..B32",
     bankKept: "The FM-1 keeps its previous bank", bankRc1: "refused", bankRc2: "a checksum error: send it again", bankRc3: "stop the playback, then send it again",
     bankRc4: "a flash error", bankRc5: "the transfer was ended: send it again", tryIt: "Try in browser", tryNext: "Try the next version", usbQ: "Switch USB SERIAL? USB drops for a moment.", usb: "USB is switching; connecting again",
@@ -4482,7 +4569,7 @@ const TEXT = {
     fm6OtherMaker: "ほかのメーカーの SysEx", fm6Universal: "ユニバーサル SysEx",
     installer: "インストーラー", classic: "旧エディタ", update: "アップデート", continue: "このまま",
     files: "ファイル", recInput: "入力", recFull: "スロットがいっぱいです", recDenied: "入力が使えません:", recSilent: "音が入っていません",
-    backupNewer: "新しいファームウェアのバックアップです。先に FM-1 を更新してください。",
+    backupNewer: "新しいファームウェアのバックアップです。先に FM-1 を更新してください。", learnFull: "16 個の CC が登録済みです。先にどれかを消してください。", pianoBuiltIn: "1.5 では内蔵", clearAll: "すべて消去",
     bankQ: "バンク {0} を FM-1 に送りますか？ バックアップには入らないので、.syx ファイルを残しておいてください。", bankSent: "FM-1 にバンク {0} が入りました: SLOT B1..B32",
     bankKept: "FM-1 は前のバンクのままです", bankRc1: "受け付けられませんでした", bankRc2: "チェックサムが合いません。もう一度送ってください", bankRc3: "再生を止めてから、もう一度送ってください",
     bankRc4: "フラッシュの書き込みエラー", bankRc5: "転送が終わってしまいました。もう一度送ってください", tryIt: "ブラウザで試す", tryNext: "次の版を試す", usbQ: "USB SERIAL を切り替えますか？ USB が一度切れます。", usb: "USB を切り替え中、つなぎ直します",
@@ -4956,18 +5043,20 @@ const __m9 = (() => {
 /* group: {t: title, place, pages: [[title, scope, ids]]} or {t, mod: first id} (the matrix, 4 rows of SRC DST AMT);
    engine: true = the engine's EDIT pages (page titles from NAMES) */
 const LAYOUT = (pe0, engine) => [
-  { t: "ENV", place: "sound", viz: "env", pages: [["ENV", 0, [1, 2, 3, 4]], ["ENV DEST", 0, [5, 6, 7, 8]]] },
+  { t: "ENV", place: "sound", viz: "env", pages: [["ENV", 0, [1, 2, 3, 4, ...(pe0 >= 103 ? [102] : [])]], ["ENV DEST", 0, [5, 6, 7, 8]]] },   /* (1.5: ESYNC) */
   { t: "LFO", place: "sound", viz: "lfo", pages: [["LFO", 0, [9, 10, 11, 12]], ["LFO DEST", 0, [13, 14, 15, 16]],
     ...(pe0 >= 96 ? [["LFO 2", 0, [91, 92, 93]]] : [])] },   /* 1.4: SYNC TRIG POL */
   { t: "EDIT", place: "sound", engine: true, pages: [["EDIT 1", 0, [pe0, pe0 + 1, pe0 + 2, pe0 + 3]], ["EDIT 2", 0, [pe0 + 4, pe0 + 5, pe0 + 6, pe0 + 7]],
-    ...(pe0 >= 91 && engine === "DRUM" ? [["LANES", 0, P_LANES.slice(0, 4)], ["LANES 2", 0, P_LANES.slice(4)]] : [])] },   /* lane levels 83..90 (1.1) */
+    ...(pe0 >= 91 && engine === "DRUM" ? [["LANES", 0, P_LANES.slice(0, 4)], ["LANES 2", 0, P_LANES.slice(4)]] : []),   /* lane levels 83..90 (1.1) */
+    ...(pe0 >= 103 && engine === "ANALOG" ? [["FILTER", 0, [101, pe0 + 4, pe0 + 5, pe0 + 7]]] : [])] },   /* 1.5: TYPE CUT RES KTR (EDIT > FILTER) */
   ...(pe0 >= 61 ? [{ t: "MOD", place: "sound", mod: 49 }] : []),
   ...(pe0 >= 81 && engine === "DIGITAL" ? [{ t: "OP ENV", place: "sound", pages: [   /* a FELUCCA_FM4=1 build only */
     ...[0, 1, 2, 3].map((k) => [`OP${k + 1}`, 0, [61 + 5 * k, 62 + 5 * k, 63 + 5 * k, 64 + 5 * k]]),
     ["OP LVL", 0, [65, 70, 75, 80]]] }] : []),
   { t: "VOICE", place: "sound", pages: [["LEVEL", 0, [0]], ["VOICE", 0, [37, 38, 41, 42]], ["VOICE 2", 0, [43, 44, 39, 40]],
     ...(pe0 >= 96 ? [["VOICE 3", 0, [95]]] : [])] },   /* 1.4: SPRD (the device's EDIT > VOICE 3) */
-  { t: "FX", place: "sound", pages: [["FX", 0, [33, 34, 35, 36]], ["SLICER", 0, [45, 46, 47, 48]], ["DLY", 1, [4, 5, 6, 7]], ["REVERB", 1, [24, 8, 9]], ["CHORUS", 1, [10, 11]]] },
+  { t: "FX", place: "sound", pages: [["FX", 0, [33, 34, 35, 36]], ["SLICER", 0, [45, 46, 47, 48]],
+    ...(pe0 >= 103 ? [["INSERT", 0, [96, 97, 98, 99, 100]]] : []), ["DLY", 1, [4, 5, 6, 7]],   /* (1.5: the track's INSERT, TYPE A B C MIX) */ ["REVERB", 1, [24, 8, 9]], ["CHORUS", 1, [10, 11]]] },
   { t: "SCL", place: "sound", pages: [["SCL", 0, [25, 26, 27, 28]], ...(pe0 >= 83 ? [["CHORD", 0, P_CHORD]] : [])] },
   { t: "ARP", place: "sound", pages: [["ARP", 0, [17, 18, 19, 20]], ["ARP 2", 0, [21, 22, 23, 24]]] },
   { t: "PATTERN", place: "seq", pages: [["PATTERN", 0, [29, 30, 31, 32, ...(pe0 >= 96 ? [94] : [])]]] },   /* (1.4: QNTZ, the track's) */
@@ -5016,7 +5105,7 @@ function paramIcon(d, v, engine) {
 })();
 /* ---- sound.js ---- */
 const __m10 = (() => {
-  const { aliasOf, engineOrder } = __m0;
+  const { F, aliasOf, engineOrder } = __m0;
   const { ENGINE_IC, el, ic, store } = __m4;
   const { fm6Screen } = __m7;
   const { G_SKIP, HEAD_IC, LAYOUT, paramIcon, visible } = __m9;
@@ -5065,11 +5154,37 @@ function soundScreen(root, ui) {
     const k = v - nf - 1, voice = b && b.voices && b.voices[k];
     return `B${k + 1}` + (voice && voice.used ? ` ${voice.name}` : "");
   } : null);
+  /* 1.5 (P_E0 >= 103): the INSERT's A B C named and shown by its TYPE (96), as the device's ins_desc; ATK DEC REL as
+     note values while ENV SYNC (102) is ON (DESC keeps the plain TIME) */
+  const v15 = () => dev.info.pe0 >= 103;
+  const insType = () => { const d = dev.pdesc[96]; return d && d.names ? d.names[dev.dump.p[96] - d.min] || "OFF" : "OFF"; };
+  const CRUSH_RATE = ["689", "919", "1.1k", "1.4k", "1.8k", "2.2k", "2.8k", "3.7k", "4.4k", "5.5k", "7.4k", "8.8k", "11k", "15k", "22k", "44k"];
+  function insView(id, d) {
+    const ty = insType(), k = id - 97;
+    if (["SOFT", "HARD", "FOLD", "FUZZ"].includes(ty)) return [{ ...d, label: "DRIVE" }, { ...d, label: "TONE", fmt: F.CUTOFF }, { ...d, label: "LEVEL", fmt: F.DB }][k];
+    if (ty === "CRUSH") return [{ ...d, label: "BITS", fmt: F.INT, rename: (x) => String(1 + (+x >> 3)) },
+      { ...d, label: "RATE", fmt: F.INT, unit: "Hz", rename: (x) => CRUSH_RATE[Math.max(0, Math.min(15, +x >> 3))] }, { ...d, label: "LPF", fmt: F.CUTOFF }][k];
+    if (["PHASR", "FLANG", "CHOR"].includes(ty)) return [{ ...d, label: "RATE", fmt: F.LFOHZ }, { ...d, label: "DEPTH" }, { ...d, label: "FDBK" }][k];
+    return d;
+  }
+  const ESYNC_NAMES = ["0", "1/64T", "1/64", "1/32T", "1/64D", "1/32", "1/16T", "1/32D", "1/16", "1/8T", "1/16D",
+    "1/8", "1/4T", "1/8D", "1/4", "1/2T", "1/4D", "1/2", "1/1T", "1/2D", "1/1", "1/1D", "2BAR", "3BAR", "4BAR"];
+  const esyncStep = (v) => Math.floor((v & 127) * 25 / 128), esyncValue = (k) => Math.floor((k * 128 + 24) / 25);
+  const esync = (s, id) => !s && v15() && [1, 2, 4].includes(id) && !!dev.dump.p[102];
   function row(s, id) {
-    const d = desc(s, id);
+    let d = desc(s, id);
     if (!visible(d) || (s === 1 && G_SKIP.has(d.label))) return null;
-    const r = paramRow(d, value(s, id), (v) => { dev.setParam(s, id, v); redraw(s, id); ui.changed(s, id, v); },
-      { icon: (v) => paramIcon(d, v, engineAt), rename: modDst(d) || fm6Slot(s, id) });
+    let rename = modDst(d) || fm6Slot(s, id);
+    if (!s && v15() && id === 96) d = { ...d, label: "TYPE" };   /* (DESC: INSRT; the device's INSERT page: TYPE) */
+    if (!s && v15() && id >= 97 && id <= 99) { const x = insView(id, d); rename = x.rename || null; d = { ...x }; delete d.rename; }
+    const sync = esync(s, id);
+    if (sync) { d = { ...d, fmt: F.INT, unit: "" }; rename = (x) => ESYNC_NAMES[esyncStep(+x)]; }
+    const r = paramRow(d, value(s, id), (v) => {
+      if (sync) v = esyncValue(esyncStep(v));     /* (as the device's knob: by name, the first value showing it) */
+      dev.setParam(s, id, v); redraw(s, id); ui.changed(s, id, v);
+      if (!s && v15() && (id === 96 || id === 102)) build(dev);   /* (A B C / ATK DEC REL take another meaning) */
+    }, { icon: (v) => paramIcon(desc(s, id), v, engineAt), rename });
+    if (!s && v15() && id >= 97 && id <= 100) r.el.classList.toggle("dim", !dev.dump.p[96]);   /* (TYPE OFF) */
     rows.set(key(s, id), r);
     return r.el;
   }
@@ -5205,7 +5320,10 @@ function soundScreen(root, ui) {
     /* the whole sound (after a load, RELOAD, another track): rebuilt when its shape changed, else values only */
     show(device) { if (device !== dev || signature() !== built) build(device); else refresh(); },
     refresh,
-    param(s, id, v) { const r = rows.get(key(s, id)); if (r) { r.update(v); redraw(s, id); } },
+    param(s, id, v) {
+      if (!s && dev && dev.dump && v15() && (id === 96 || id === 102) && rows.get(key(s, id)) && !rows.get(key(s, id)).busy()) return build(dev);   /* (1.5) */
+      const r = rows.get(key(s, id)); if (r) { r.update(v); redraw(s, id); }
+    },
   };
   function refresh() {
     if (!dev || !dev.dump) return;
@@ -5275,9 +5393,10 @@ const TIMES = ["NOTE", "TIE", "REST"];
 const autoName = (version) => (cmpVersion(version, "1.0.4") >= 0 ? "AUTOMATION" : "MOTION");
 /* the ids MOTION can record (EDITOR_PROTOCOL.md v7, the device's motion_param): 83 .. P_COUNT-1 are the engine's
    (1.0.x) or the DRUM lane levels and the engine's (1.1: 83..90, 91..98); not the chord keys 81, 82;
-   1.4 (P_COUNT 104): 83..90 the lane levels, 95 SPRD, 96..103 the engine's; never LFO 2 / QUANTIZE 91..94 */
-const motionIds = (pcount = 91) => [...Array(17).keys(), 33, 34, 35, 36, 38, 39, 44, ...Array.from({ length: 20 }, (_, k) => 61 + k),
-  ...Array.from({ length: Math.max(0, pcount - 83) }, (_, k) => 83 + k).filter((id) => pcount < 104 || id < 91 || id > 94)];
+   1.4 (P_COUNT 104): 83..90 the lane levels, 95 SPRD, 96..103 the engine's; never LFO 2 / QUANTIZE 91..94;
+   1.5 (P_COUNT 111, P_E0 103): also the INSERT 96..100; never TYPE / ESYNC 101, 102 */
+const motionIds = (pcount = 91, pe0 = pcount - 8) => [...Array(17).keys(), 33, 34, 35, 36, 38, 39, 44, ...Array.from({ length: 20 }, (_, k) => 61 + k),
+  ...Array.from({ length: Math.max(0, pcount - 83) }, (_, k) => 83 + k).filter((id) => pcount < 104 || id < 91 || (id > 94 && id < 101) || id >= pe0)];
 const MOTION_IDS = motionIds(91);
 const EMPTY = { n: 0, notes: [0, 0, 0, 0], time: 2, flags: 0, vel: 0, hit: 0, acc: 0, chance: 100, ratchet: 1 };
 const stepOn = (s) => !!s && s.time === 0 && (s.n > 0 || (s.hit | 0) > 0);
@@ -5450,7 +5569,7 @@ function seqScreen(root, ui) {
     });
     /* (the DRUM lane levels, 1.1: offered on a DRUM track only, where they sound) */
     const lane = (id) => dev.info.pe0 >= 91 && id >= 83 && id <= 90, drum = dev.engineName() === "DRUM";
-    const can = motionIds(dev.info.pcount).filter((id) => visible(dev.pdesc[id]) && !evs.some((e) => e.param === id) && (!lane(id) || drum));
+    const can = motionIds(dev.info.pcount, dev.info.pe0).filter((id) => visible(dev.pdesc[id]) && !evs.some((e) => e.param === id) && (!lane(id) || drum));
     const pick = el("select", { "aria-label": autoName(dev.info.version) }, ...can.map((id) => el("option", { value: id, text: dev.pdesc[id].label + (id >= dev.info.pe0 ? " · " + dev.engineName() : "") })));
     const add = el("button", { type: "button", class: "btn", disabled: !can.length || m.count >= m.max,
       onclick: () => { const id = +pick.value; dev.motionOp(3, { step: cur, param: id, value: dev.dump.p[id] }); } }, ic("control_add"), `${t("steps")} ${cur + 1}`);
@@ -6424,7 +6543,9 @@ function samplesScreen(root, ui) {
       el("div", { class: "slothead" },
         el("b", { text: u.zones ? u.name || "—" : t("empty") }),
         el("span", { class: "lbl", text: u.zones ? `${u.zones} ZONES · ${u.kib} KiB` : "" }),
-        dev.info.motionCap ? el("button", { type: "button", class: "btn sm", disabled: busy || recActive(), onclick: () => pianoHd(k) }, ic("symbol_download"), "PIANO HD") : null,
+        /* (1.5: SAMPLE's built-in PIANO is that piano again, P_E0 >= 103: nothing to install; a slot holding it stays) */
+        dev.info.pe0 >= 103 ? (k === 0 ? el("span", { class: "lbl", text: `PIANO HD · ${t("pianoBuiltIn")}` }) : null)
+          : dev.info.motionCap ? el("button", { type: "button", class: "btn sm", disabled: busy || recActive(), onclick: () => pianoHd(k) }, ic("symbol_download"), "PIANO HD") : null,
         el("button", { type: "button", class: "btn sm", disabled: busy || !u.zones, onclick: async () => { if (await ui.confirm(`ERASE USR${k + 1}?`)) { busy = true; drawAll(); try { await dev.smpErase(k); } finally { busy = false; drawAll(); } } } }, ic("symbol_trash"), t("erase"))),
       el("div", { class: "meter", role: "img", "aria-label": `${u.kib} / ${dev.smp.slotKiB} KiB` }, el("i", { style: `width:${(u.kib / dev.smp.slotKiB * 100).toFixed(1)}%` })),
       el("div", { class: "draft" },
@@ -6611,18 +6732,20 @@ function projectScreen(root, ui) {
 })();
 /* ---- settings.js ---- */
 const __m19 = (() => {
-  const { el, store } = __m4;
+  const { el, ic, store } = __m4;
   const { G_SKIP, HEAD_IC, LAYOUT, paramIcon, placedGlobals, visible } = __m9;
   const { card, cells, paramRow } = __m5;
   const { MENU_ICON, MENU_TAB_ICON } = __m8;
   const { knownLayout } = __m2;
   const { LANGS, getLang, setLang, t } = __m6;
+  const { midiLearn } = __m0;
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
 //
 // Settings: the device's globals (BPM, swing, tune, MIDI IN), its display preferences (theme, font, MIDI monitor),
 // its MENU settings (1.0.4: LEDS .. USB SERIAL, as the device lists them),
 // the editor's own (display, text size, language: kept in this browser) and what the device reported.
+
 
 
 
@@ -6701,6 +6824,42 @@ function settingsScreen(root, ui) {
     return r.el;
   }
 
+  /* MIDI LEARN (1.5): the device's CC map (a CC sets one parameter of one track), read as settings open; a parameter
+     of the engine is named by the selected track's engine when it is that track, else "<engine> E<n>" */
+  function learnCard() {
+    const L = dev.info.midiLearn ? dev.learn : null;
+    if (!L) return null;
+    const pe0 = dev.info.pe0, eng = (k) => (dev.mix && dev.mix.tracks[k] ? dev.info.engines[dev.mix.tracks[k].engine] || "" : "");
+    const pname = (k, id) => (id < pe0 ? (dev.pdesc[id] || {}).label || `P${id}`
+      : k === (dev.sel ?? 0) && dev.pdesc[id] ? dev.pdesc[id].label : `${eng(k)} E${id - pe0 + 1}`);
+    const used = L.entries.filter((x) => x.used).sort((a, b) => a.cc - b.cc);
+    const say = (rc) => (rc === 5 ? ui.say(t("learnFull"), "warn") : ui.prefResult(rc));
+    const rows = used.map((x) => el("div", { class: "learnrow" },
+      el("b", { text: `CC${x.cc}` }), el("span", { text: `T${x.track + 1} ${pname(x.track, x.id)}` }),
+      el("button", { type: "button", class: "iconbtn sm", "aria-label": `CC${x.cc} ×`, onclick: async () => say(await dev.learnSet(x.cc, 0, null)) }, ic("symbol_cross"))));
+    /* add: a CC (never the ones the device does not learn), a track, a parameter of the selected track */
+    const ccIn = el("input", { class: "text", type: "number", min: 0, max: 127, value: "", placeholder: "CC", "aria-label": "CC" });
+    const trSel = el("select", { "aria-label": t("track") }, ...[0, 1, 2, 3].map((k) => el("option", { value: k, text: `T${k + 1}`, selected: k === (dev.sel ?? 0) })));
+    const ids = [];
+    for (let id = 0; id < dev.info.pcount; id++) if (visible(dev.pdesc[id]) && !(id >= 81 && id <= 82)) ids.push(id);
+    const idSel = el("select", { "aria-label": "PARAM" }, ...ids.map((id) => el("option", { value: id, text: dev.pdesc[id].label + (id >= pe0 ? ` · ${dev.engineName()}` : "") })));
+    const add = el("button", { type: "button", class: "btn", onclick: async () => {
+      const cc = +ccIn.value;
+      if (ccIn.value === "" || !Number.isInteger(cc) || cc < 0 || cc > 127 || midiLearn.never(cc)) { ccIn.classList.add("bad"); return; }
+      ccIn.classList.remove("bad");
+      say(await dev.learnSet(cc, +trSel.value, +idSel.value));
+    } }, ic("control_add"), "ADD");
+    const c = card("MIDI LEARN", "port_midi",
+      el("div", { class: "rows" }, ...rows),
+      el("div", { class: "addrow learnadd" }, ccIn, trSel, idSel, add),
+      el("div", { class: "acts wrap" },
+        el("button", { type: "button", class: "btn", onclick: () => dev.readLearn() }, ic("control_arrow_loop"), "RELOAD"),
+        el("button", { type: "button", class: "btn", disabled: !used.length, onclick: async () => { if (await ui.confirm(`${t("clearAll")} (MIDI LEARN)?`)) say(await dev.learnSet(null)); } },
+          ic("symbol_trash"), t("clearAll"))));
+    c.aside.textContent = `${used.length} / ${L.n}`;
+    return c;
+  }
+
   function editor() {
     const th = THEMES.indexOf(store.get("felucca-editor-theme", "system"));
     const k = SIZES.indexOf(+store.get("felucca-editor-size", "1"));
@@ -6740,6 +6899,8 @@ function settingsScreen(root, ui) {
       const disp = dev && dev.dump ? display() : null;
       if (disp) grid.append(disp);
       if (dev && dev.dump) grid.append(...menu());
+      const ln = dev && dev.dump ? learnCard() : null;
+      if (ln) grid.append(ln);
       grid.append(editor(), system());
       root.replaceChildren(grid);
     },
@@ -7016,6 +7177,7 @@ async function connect() {
     d.on("song", () => project.refresh());
     d.on("error", (e) => (["noreply", "backupNewer"].includes(e.message) ? sayK(e.message, "", "warn") : sayK("error", e.message)));
     d.on("menu", (items) => settings.menu(items));
+    d.on("learn", () => { if (d.loaded) settings.show(d); });
     d.on("closed", (reason) => {
       if (dev !== d) return;
       dev = null; $("#update").hidden = true; renderAll(); relabel(); sayK(reason);
