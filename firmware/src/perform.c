@@ -5,8 +5,13 @@
  * it is let go (ui_input.c opens the layer and shows the map). The 16 white keys (F3 .. G5) hold the effect the map
  * gives them (perf_map: the settings, ui_layer.c; any effect on any key, or none). The default (PF_DEF, 1.1.5's
  * keys and the two of 1.2 after them):
- *   REPEAT 1/8 1/16 1/32, REVERSE, LPF | HPF, TAPE STOP, FREEZE, OCT UP, OCT DN, FLANGER, PHASER;  the other 4
- *   white keys nothing; black keys 1..4 (F#3 G#3 A#3 C#4): tracks 1..4 muted while held (not P_MUTE, never saved).
+ *   REPEAT 1/8 1/16 1/32, REVERSE, LPF | HPF, TAPE STOP, FREEZE, OCT UP, OCT DN, FLANGER, PHASER, REV THROW, ECHO
+ *   THROW (1.5.1, D5 E5);  the other 2 white keys nothing; black keys 1..4 (F#3 G#3 A#3 C#4): tracks 1..4 muted while
+ *   held (not P_MUTE, never saved).
+ * REV THROW / ECHO THROW (1.5.1): while held every track's reverb / delay send is full (as REV / DLY 127; perf_throw),
+ * ECHO THROW also lifts the delay's feedback to 0.7 if it is lower (fx.c fx_buses); both glide in and out over 11.6 ms
+ * (THR_SLOPE). Let go, the sends are the tracks' own again and what the buses hold rings out. The buses are the song's
+ * (no RAM of their own); the tracks' REV / DLY / FDBK values are never touched (nothing saved, nothing recorded).
  * REPEAT and REVERSE start on the next 1/16 (at once while stopped); the others at once; all end when let go,
  * with a 2.9 ms ramp. Effects of different kinds stack; of the buffer ones (REPEAT, REVERSE, TAPE STOP,
  * FREEZE, OCT UP, OCT DN) the last pressed plays, and letting it go returns to the one held before.
@@ -40,8 +45,9 @@
  * Idle (no key, no knob, no ramp left) every stage is skipped: the output is bit-identical. */
 /* the effects (their numbers are stored: the key map in the settings, ui_layer.c perf_map_put; append-only, before
  * PF_M1), then the mutes of the black keys */
-enum { PF_R8, PF_R16, PF_R32, PF_REV, PF_LPF, PF_HPF, PF_TAPE, PF_FRZ, PF_OUP, PF_ODN, PF_FLG, PF_PHS, PF_M1,
-       PF_N = PF_M1 + NTRK };
+enum { PF_R8, PF_R16, PF_R32, PF_REV, PF_LPF, PF_HPF, PF_TAPE, PF_FRZ, PF_OUP, PF_ODN, PF_FLG, PF_PHS,
+       PF_RTHR, PF_ETHR,                      /* 1.5.1: REV THROW, ECHO THROW */
+       PF_M1, PF_N = PF_M1 + NTRK };
 #define PF_NFX PF_M1                          /* the effects a white key can hold */
 #define PF_KEYS 16u                           /* the white keys F3 .. G5 */
 #define PF_BIT(e) (1u << (e))
@@ -68,12 +74,15 @@ enum { BM_NONE, BM_LOOP, BM_TAPE, BM_FRZ, BM_HARM };
 #define FL_FB 16384                           /* .. the feedback, Q15: 0.5 */
 #define PH_ST 4u                              /* PHASER: all-pass stages a side (two notches, the classic pedal's) */
 #define PH_FB 13107                           /* .. the feedback, Q15: 0.4 */
+#define THR_SLOPE 64                          /* REV / ECHO THROW: the sends' glide a sample, Q15 (11.6 ms end to end) */
+#define THR_FB 22938                          /* ECHO THROW: the delay's feedback while held at least this, Q15 (0.7) */
 
-/* the white keys' effects by default (1.1.5's ten, then FLANGER and PHASER; PF_N: none) */
+/* the white keys' effects by default (1.1.5's ten, then FLANGER and PHASER, 1.5.1's REV THROW and ECHO THROW on D5
+ * and E5; PF_N: none) */
 static const uint8_t PF_DEF[PF_KEYS] = {PF_R8, PF_R16, PF_R32, PF_REV, PF_LPF, PF_HPF, PF_TAPE, PF_FRZ, PF_OUP, PF_ODN,
-                                        PF_FLG, PF_PHS, PF_N, PF_N, PF_N, PF_N};
+                                        PF_FLG, PF_PHS, PF_RTHR, PF_ETHR, PF_N, PF_N};
 static volatile uint8_t perf_map[PF_KEYS] = {PF_R8, PF_R16, PF_R32, PF_REV, PF_LPF, PF_HPF, PF_TAPE, PF_FRZ, PF_OUP,
-                                             PF_ODN, PF_FLG, PF_PHS, PF_N, PF_N, PF_N, PF_N};
+                                             PF_ODN, PF_FLG, PF_PHS, PF_RTHR, PF_ETHR, PF_N, PF_N};
                                       /* main: white key p's effect (PF_N none), from the settings (ui_layer.c) */
 static volatile uint8_t perf_remap;   /* main: perf_map changed (seq.c: a key held takes its new effect) */
 
@@ -130,6 +139,8 @@ static struct {
     int32_t cw, cc, chl, chr;          /* CRUSH share, amount, held sample */
     uint32_t cn;
     int32_t td;                        /* THROW: the share of the dry mix sent, Q15 */
+    int32_t rw, ew, rw1, ew1;          /* REV / ECHO THROW: their shares (Q15) at this block's start and end */
+    uint8_t thr;                       /* .. either at work this block (mix_part: perf_throw) */
     int32_t mg[NTRK];                  /* mute gains, Q15 (32768 = open) */
     /* FLANGER, PHASER */
     int32_t fw, pw;                    /* their shares, Q15 */
@@ -341,6 +352,14 @@ static __attribute__((noinline)) int perf_begin(uint32_t n)
             pf.hk[k] = (int16_t)(PF_SVF[j][k] + (((PF_SVF[j < 63 ? j + 1 : 63][k] - PF_SVF[j][k]) * g) >> 8));
         }
     }
+    {   /* REV / ECHO THROW: their shares glide (THR_SLOPE a sample) to full while held, back to 0 when let go */
+        int32_t s = THR_SLOPE * (int32_t)n;
+        pf.rw = pf.rw1;
+        pf.ew = pf.ew1;
+        pf.rw1 += clamp((pf.act & PF_BIT(PF_RTHR) ? 32768 : 0) - pf.rw1, -s, s);
+        pf.ew1 += clamp((pf.act & PF_BIT(PF_ETHR) ? 32768 : 0) - pf.ew1, -s, s);
+        pf.thr = (pf.rw | pf.rw1 | pf.ew | pf.ew1) != 0;
+    }
     pf.mute = 0;
     for (k = 0; k < NTRK; k++)
         if (((held >> (PF_M1 + k)) & 1u) || pf.mg[k] != 32768)
@@ -386,6 +405,26 @@ static __attribute__((noinline)) void perf_pre(const int32_t *ml, const int32_t 
             sd[i] += x;
             sr[i] += x;
         }
+    }
+}
+
+/* REV THROW / ECHO THROW (1.5.1): track t's reverb / delay send towards full (127) while held, b its signal as its sends
+ * take it (fx.c mix_part, after the mute key; t's values as the matrix has them this block). What the full send adds to
+ * the track's own (REV / DLY) goes in at the share rw / ew, which glides from the block's start to its end a sample at
+ * a time (THR_SLOPE: no click; every track the same glide). The track's REV / DLY are never changed: nothing is saved
+ * or recorded, and when the key is let go the share glides back to 0 and the buses ring out as they are */
+static __attribute__((noinline)) void perf_throw(const track_t *t, const int32_t *b, int32_t *sd, int32_t *sr, uint32_t n)
+{
+    uint32_t i;
+    int32_t lvl = LEVEL_Q12[t->p[P_LEVEL] & 127];
+    int32_t rg = 32766 - t->p[P_REV] * 258, dg = 32766 - t->p[P_DLY] * 258;   /* full (127 * 258) less its own */
+    int32_t rw = pf.rw, ew = pf.ew, r1 = pf.rw1, e1 = pf.ew1;
+    for (i = 0; i < n; i++) {
+        int32_t x = clamp(((b[i] >> 2) * lvl) >> 10, -65536, 65536);   /* (mix_part's xs at a full send) */
+        rw += clamp(r1 - rw, -THR_SLOPE, THR_SLOPE);
+        ew += clamp(e1 - ew, -THR_SLOPE, THR_SLOPE);
+        sr[i] += mulq15(x, mulq16(rg, (uint32_t)rw << 1));
+        sd[i] += mulq15(x, mulq16(dg, (uint32_t)ew << 1));
     }
 }
 
@@ -759,6 +798,6 @@ static __attribute__((noinline)) void perf_block(int32_t *bl, int32_t *br, uint3
         perf_flanger(bl, br, n);
     if ((pf.act & PF_BIT(PF_PHS)) || pf.pw)
         perf_phaser(bl, br, n);
-    pf.busy = pf.act || pf.mode != BM_NONE || pf.w || pf.la || pf.ha || pf.cw || pf.td || pf.mute || pf.fw || pf.pw ||
+    pf.busy = pf.act || pf.mode != BM_NONE || pf.w || pf.la || pf.ha || pf.cw || pf.td || pf.mute || pf.fw || pf.pw || pf.thr ||
               pf.fn || perf_k[0] || perf_k[1] || perf_k[2];
 }

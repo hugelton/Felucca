@@ -437,6 +437,11 @@ function mockTables() {
   ok(shown(div).join() === "4BAR,2BAR,1/1,1/2,1/4,1/8,8T,1/16,16T,1/32" &&
      slr.some((d) => shown(d).join() === "1/8,8T,1/16,16T,1/32,32T") && div.names[2] === "1/16",
      "editor: #48 DIV / RATE / TIME longest first (values unchanged: 2 is still 1/16)");
+  const tim = T.GP.filter((d) => d.label === "TIME");
+  ok(tim.length === 1 && shown(tim[0]).join() === "4BAR,2BAR,1/1,1/2,1/4D,1/4,1/8D,1/8,1/16D,8T,1/16,16T,1/32" &&
+     tim[0].names.slice(0, 10).join() === "1/4,1/8,1/16,1/32,8T,16T,1/2,1/1,2BAR,4BAR" && tim[0].names[10] === "1/8D" &&
+     shown(div).length === 10,
+     "editor: 1.5.1 delay TIME: 1/8D 1/16D 1/4D appended (10..12), shown by length; DIV keeps its ten");
   const swg = [T.TP, T.GP].flatMap((tb) => tb.filter((d) => d.label === "SWG"));
   ok(swg.length === 3 && swg.every((d) => E.fmtValue(d, 100)[0] === "100" && E.fmtValue(d, 50)[0] === "50") &&
      E.fmtValue({ fmt: swg[0].fmt, min: 0, max: 127 }, 127)[0] === "100" && E.fmtValue({ fmt: swg[0].fmt, min: 0, max: 127 }, 64)[0] === "50",

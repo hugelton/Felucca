@@ -195,6 +195,8 @@ static struct {
         uint8_t pick, trk, id;   /* a parameter picked (1): its track and P_* id */
         volatile uint8_t io[2];  /* midi_control.c ml_arm, ml_heard */
     } ml;
+    volatile uint8_t mpc[NTRK];  /* MIDI Program Change per track, 0x80 | program, 0 none (midi_control.c mpc_io: here
+                                  * for the same reason as ml.io; midi_pc_poll) */
 } ui;
 
 enum { CF_NONE, CF_CLEAR_SEQ, CF_CLEAR_TRK, CF_OVR_PROJ, CF_OVR_USER, CF_LOAD_PAT,
@@ -497,6 +499,12 @@ static void page_entered(void)
 }
 
 static int step_on(const step_t *st) { return st->time == ST_NOTE && (st->n || st->hit); }
+/* 1.5.1 (#199): a step whose CHANCE, RATCH or NUDGE is off its default: marked on the roll and the grid (ui_graph.c).
+ * Not VEL: every recorded step has one */
+static int step_detailed(const step_t *st)
+{
+    return step_chance(st) < 100u || step_ratchet(st) > 1u || step_nudge(st) != 0;
+}
 
 static void step_clear(step_t *st)
 {
@@ -540,6 +548,13 @@ static uint32_t note_set_len(track_t *t, uint32_t i, uint32_t want)
  * steps: the grid shows a step's notes on their lanes (eng_drum.c step_lanes) and an edit makes the lane its
  * own (grid_own). Live recording on a DRUM track writes hits (seq.c rec_note) */
 static int grid_on(void) { return !ui.home && !ui.menu && !ui.confirm && cur_page()->graph == GR_ROLL && drum_track(TSEL); }
+/* SEQ > DETAIL (1.5.1, Discussion #199; params.c, between STEP and AUTOMATION): a step page as STEP (the cursor, the
+ * roll's keys, the grid's lane and page keys), its knobs the cursor step's CHANCE RATCH NUDGE VEL (ui_input.c sd_turn),
+ * its panel their lanes (ui_graph.c graph_detail). No state of its own: the page is what says so */
+static int detail_on(void)
+{
+    return !ui.home && !ui.menu && !ui.confirm && cur_page()->scope == SC_STEP && str_eq(cur_page()->title, "DETAIL");
+}
 /* GLO > SONG (1.2): the white keys A B C D (A3 B3 C4 D4, white places 2..5: seq.c song_key) set the selected cell's slot;
  * they do not sound there, the other keys play as anywhere (seq.c keyboard_block: song.grid 3) */
 static int song_keys_on(void) { return !ui.home && !ui.menu && !ui.confirm && !ui.layer && cur_page()->graph == GR_SONG; }
@@ -1256,6 +1271,48 @@ static void set_engine_of(track_t *t, uint32_t ei)
 static void apply_preset(uint32_t pi) { apply_preset_to(TSEL, pi); }
 static void set_engine(uint32_t ei) { set_engine_of(TSEL, ei); }
 
+/* MIDI Program Change (1.5.1, #179 by renebohne): program n on track t, as the PRESETS list numbers the engine's sounds
+ * from 0: its n-th preset, the aliases skipped (preset_orig), loaded as from there (the track's own settings kept, one
+ * undo for a run of them). DRUM: its n-th KIT, the retired variants skipped (enum_orig); FM6: its presets (F1..F8),
+ * then the voice bank's B1..B32 through SLOT as the knob loads them (fm6_poll; the rest of the sound stays), an empty
+ * one ignored. A program past the last is ignored, not wrapped: a number is always the same sound */
+static volatile uint8_t *const mpc_io = ui.mpc;
+static void midi_pc_load(track_t *t, uint32_t n)
+{
+    uint32_t e = t->eng_req % NENGINES, k;
+    if (e == ENGI_DRUM) {
+        const param_desc_t *d = param_desc_of(e, P_E0);
+        for (k = (uint32_t)d->min; k <= (uint32_t)d->max && (enum_orig(d, (int32_t)k) != (int32_t)k || n--); k++)
+            ;
+        if (k <= (uint32_t)d->max)
+            t->p[P_E0] = (int16_t)k;
+        return;
+    }
+    if (n >= preset_shown(e)) {
+        int32_t s = (int32_t)(FM6_OWN + 1u + n - preset_shown(e));
+        if (e == ENGI_FM6 && fm6_bank_slot(s) >= 0 && fm6_slot_ok(s))
+            t->p[P_E7] = (int16_t)s;
+        return;
+    }
+    for (k = 0; preset_orig(ENGINES[e], k) != k || n--; k++)   /* the n-th shown preset */
+        ;
+    apply_preset_to(t, k);
+}
+static void midi_pc_poll(void)                       /* main loop (ui_input) */
+{
+    uint32_t k, v;
+    for (k = 0; k < NTRK; k++) {
+        if (!ui.mpc[k])
+            continue;
+        fm1_irq_off();                               /* (the ISR may note another meanwhile) */
+        v = ui.mpc[k];
+        ui.mpc[k] = 0;
+        fm1_irq_on();
+        midi_pc_load(&trk[k], v & 127u);
+        ui.force = 1;
+    }
+}
+
 static void track_defaults(track_t *t)
 {
     uint32_t i;
@@ -1364,12 +1421,34 @@ static int preset_favorite(void)
     return favorite_has(k < UP_SLOTS ? NENGINES : TSEL->eng_req,
                                         k < UP_SLOTS ? k : TSEL->preset);
 }
+/* #197: a settings change made by a knob (PRESETS > LIST, the FAV mark on PRESETS and in the EDIT layer) is written
+ * later, as MENU's are when it closes: a write erases a flash sector with the interrupts off (~40 ms), which stops the
+ * LED scan (every LED but one column's goes dark: a flash of the whole panel) and the audio. Written once the view it
+ * was made in is left (another page, HOME, a layer opened or let go, the MENU) or after SET_LATER_MS without panel
+ * input (ui.c scrn.idle; the autosave's wait), never on every detent; settings_poll still waits for the transport */
+#define SET_LATER_MS 10000u
+static struct { uint8_t on, page, home, layer; } set_later __attribute__((section(".pool")));   /* (.bss as before) */
+static void settings_later(void)
+{
+    set_later.on = 1;
+    set_later.page = ui.page;
+    set_later.home = ui.home;
+    set_later.layer = ui.layer;
+}
+static void settings_later_poll(void)                  /* ui_input, every pass */
+{
+    if (set_later.on && (set_later.page != ui.page || set_later.home != ui.home || set_later.layer != ui.layer ||
+                         ui.menu || fm1_ms - scrn.idle >= SET_LATER_MS)) {
+        set_later.on = 0;
+        settings_save();
+    }
+}
 static void preset_mark(int on)
 {
     uint32_t k = user_of(TSEL);
     if (favorite_set(k < UP_SLOTS ? NENGINES : TSEL->eng_req, k < UP_SLOTS ? k : TSEL->preset, on)) {
         ui.force = 1;
-        settings_save();
+        settings_later();
     }
 }
 

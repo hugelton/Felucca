@@ -161,6 +161,12 @@ Other enums that grew: `P_SDIV` (DIV, id 30) has 10 names (1/4, 1/8, 1/16, 1/32,
 4BAR; the first six keep their numbers), `P_AMODE` (id 17) 15 (OFF, UP, DN, UPDN, RND, ORD, REPEAT, and since 1.2 DNUP, UP+8, CONV, DIVG, PINKY, THUMB, WALK,
 CHORD: values 7..14, appended; an editor that knows only 7 names shows the value by `DESC`'s name) and the
 global `G_CLOCK` (id 2, label "CLK") 3 (INT, USB, TRS). `G_MIDI` (id 12) is an enum of USB / TRS that nothing reads.
+Since 1.5.1 the delay's `G_DTIME` (global id 4, label "TIME") has 13 names: P_SDIV's ten at the same values, then
+1/8D, 1/16D, 1/4D (values 10..12, dotted: 3/4, 3/8, 3/2 of a quarter); `DESC` sends all 13, max 12. P_SDIV, P_ARATE
+and the LFO's SYNC keep their lists. The device's knob steps TIME by length, longest first (4BAR 2BAR 1/1 1/2 1/4D
+1/4 1/8D 1/8 1/16D 8T 1/16 16T 1/32); an editor sorting by the names' lengths reads "n/mD" as 1.5 x n/m. An editor
+that knows only ten names shows 10..12 by `DESC`'s names; a `SET` of 10..12 to a 1.5 device is clamped to 9 (4BAR).
+The FX layer's REV THROW and ECHO THROW (1.5.1) are performance only: no parameter, nothing in the protocol.
 
 **Retired enum values (aliases).** A value that no longer exists keeps its number, so stored sounds stay valid:
 `DESC` names it like the value it now plays (an alias), the device never holds it (a `SET` of it lands on that value

@@ -5,11 +5,11 @@
 
 ![Felucca 1.0](docs/felucca-1.0.png)
 
-**TL;DR:** Felucca 1.5 — an INSERT effect on every track, MIDI LEARN on the device, ANALOG's band-pass and high-pass, ENV SYNC, note lengths and per-step velocity, field testing. Connect your FM-1 to a computer by USB,
+**TL;DR:** Felucca 1.5.1 — SEQ > DETAIL for a step's chance, ratchet, nudge and velocity, MIDI Program Change, dotted delay times, REV / ECHO THROW, on top of 1.5's INSERT effects, MIDI LEARN, ANALOG's band-pass and high-pass, ENV SYNC, note lengths and per-step velocity. Connect your FM-1 to a computer by USB,
 open the [web installer](https://hugelton.github.io/Felucca/) in Chrome or Edge, and press Install;
 no extra hardware is needed. Installing is at your own risk: M-VAVE's updater or the installer's
 **Return to official V15** takes you back. Coming from 1.1.5.x? Read [⚠ Coming from 1.1.5](#-coming-from-115) first:
-projects saved by 1.4 or later do not open on 1.1.5.x. Going back from 1.5 to 1.4.1? Read
+projects saved by 1.4 or later do not open on 1.1.5.x. Going back from 1.5.x to 1.4.1? Read
 [⚠ New in 1.5](#new-in-15) first: projects saved by 1.5 do not open on 1.2 to 1.4.1. Want to look around first?
 [Try it in your browser](https://hugelton.github.io/Felucca/webapp/try/), no FM-1 needed.
 
@@ -33,7 +33,8 @@ Multi-engine synthesizer firmware for the M-VAVE FM-1. Please report what you fi
   8 voices shared between them. ALGORITHM selects the track on every page
 - **Sequencer:** 64 steps per track with chords, ties, accent, slide, per-step chance, velocity and ratchets
   (a step played 2, 3 or 4 times in its length); a piano roll of the steps, where KNOB 3 sets a note's length; a drum grid (white keys =
-  steps, black keys = lanes); automation: recording of knob moves per step (an automation icon marks the cards it
+  steps, black keys = lanes); **SEQ > DETAIL**: the cursor step's chance, ratchet, nudge and velocity on the four
+  knobs, drawn as lanes over the steps; automation: recording of knob moves per step (an automation icon marks the cards it
   drives); live loop recording with overdub; step recording at the cursor (REC on SEQ > STEP while stopped), one
   chord at a time or note by note (MENU > CHORD ENTRY ADD); divisions listed by length, 4 bars to 1/32; loading a
   sound never touches your patterns
@@ -66,10 +67,11 @@ Multi-engine synthesizer firmware for the M-VAVE FM-1. Please report what you fi
 - **SPREAD** (EDIT > VOICE 3): the voices of a POLY or UNISON track alternate left and right of its PAN
 - **ENV SYNC** (ENV > ENV DEST): the envelope's attack, decay and release as note values of the tempo
 - **Effects:** distortion, an **INSERT** (drives, CRUSH, phaser, flanger, chorus, with a dry / wet MIX) and the
-  SLICER per track; chorus, delay and reverb sends (the reverb as
+  SLICER per track; chorus, delay (in time with the tempo, dotted values included) and reverb sends (the reverb as
   **HALL**, ROOM or SPRING; HALL is a smooth stereo reverb, the default on a fresh start); master limiter
 - **FX layer:** hold FX for repeat, reverse, filter sweeps, tape stop, freeze, a harmonizer
-  (OCT UP / OCT DN with shimmer), **FLANGER** and **PHASER** (in time with the tempo), and mutes on the black keys;
+  (OCT UP / OCT DN with shimmer), **FLANGER** and **PHASER** (in time with the tempo), **REV THROW** and **ECHO THROW**
+  (every track's reverb or delay send full while held), and mutes on the black keys;
   any white key can hold any effect (hold the key in the layer and turn PRESETS); MENU > FX LATCH makes them toggle,
   so nothing has to stay held
 - **MOMENTARY:** hold LFO and turn a knob on HOME or a sound / FX page; let go of LFO and the value jumps back
@@ -102,11 +104,37 @@ Multi-engine synthesizer firmware for the M-VAVE FM-1. Please report what you fi
   the keys send on the track's channel; pitch bend, sustain, panic; clock from internal, USB or TRS. MIDI CCs set
   track parameters: 5 GLIDE, 7 LEVEL, 10 PAN, 71 resonance, 72 / 73 / 75 release / attack / decay, 74 brightness,
   91 / 93 / 94 the reverb, chorus and delay sends. **MIDI LEARN** (GLO + D4) sets up to 16 more CCs of your
-  controller to any knob's parameter of any track, on the device
+  controller to any knob's parameter of any track, on the device; **Program Change** loads a track's sound by its
+  number in PRESETS
 - **Web:** editor for every parameter (with a 6-operator FM patch editor that also sends a whole 32-voice bank),
   step grid, mixer, preset library, sample upload and recording with trim, the MENU settings; full backup and restore
   (everything but the FM6 voice bank: keep its .syx file);
   return to the official firmware; Felucca itself running in the browser
+
+## New in 1.5.1
+
+- **SEQ > DETAIL** (Discussion #199): SEQ now goes STEP, **DETAIL**, AUTOMATION. DETAIL is the STEP page (the same
+  cursor, the same piano roll or drum grid) with KNOB 1–4 as the cursor step's **CHANCE**, **RATCH**, **NUDGE** and
+  **VEL**; PRESETS walks the steps, and on a DRUM track a white key picks its step. The four are drawn as lanes over
+  the steps; EDIT puts the step's four back. On STEP and the drum grid a step with a CHANCE, RATCH or NUDGE gets a
+  small mark. These are the values AUTOMATION lists (EDIT there still deletes a row): nothing new is stored.
+- **MIDI Program Change** (PR #179 by [renebohne](https://github.com/renebohne)): a Program Change on a track's
+  channel (routed as notes by MENU > MIDI > MIDI IN) loads that track's sound, numbered from 0 as PRESETS lists
+  the engine's sounds. DRUM: its kits (0–5: STD, 80, 10, 66, 55, 77). FM6: 0–7 its presets (F1–F8), 8–39 the voice
+  bank's B1–B32 that hold a voice. A number past the last is ignored; the engine never changes. SAVE held undoes it.
+- **Dotted delay times:** the DLY page's TIME has **1/4D, 1/8D and 1/16D**, and the knob steps them by length
+  (… 1/2, 1/4D, 1/4, 1/8D, 1/8, 1/16D, 8T …). The delay holds 1.49 s, so 1/4D is held to that at 60 BPM and below.
+- **REV THROW and ECHO THROW** in the FX layer, on **D5** and **E5** by default: while held, every track's reverb
+  send (REV THROW) or delay send (ECHO THROW) is full, gliding in and out without a click; ECHO THROW also lifts the
+  delay's FDBK to 70 % if it is lower. Let go and the tails ring out. Nothing is saved or recorded. If you had set
+  D5 or E5 to NONE, they now hold the throws: set them to NONE again (hold the key in the FX layer, turn PRESETS).
+- Fixed: turning KNOB 4 (LIST) or KNOB 3 (FAV) on PRESETS made all the LEDs flash; the change is now saved once you
+  leave the page or after 10 s idle (#197). MOMENTARY (LFO held) now works on MIXER too: LEVEL, PAN, REV and MUTE go
+  back when LFO is let go (#195).
+- USB audio: the descriptors list the audio streaming interface before the MIDI one, for the USB audio driver of
+  older macOS, where the audio input did not appear (#67; expected to fix macOS 15 and earlier, to be confirmed).
+- 1.5.1 keeps 1.5's formats: projects, presets and settings move between 1.5 and 1.5.1 both ways (on 1.5 a
+  dotted delay TIME plays as 4BAR).
 
 ## New in 1.5
 
@@ -201,7 +229,7 @@ The pages by button:
 | Button | Taps go round | Held |
 |---|---|---|
 | HOME | HOME, MIXER, CLOCK (BPM, swing, clock source) | the menu |
-| SEQ | STEP (the piano roll, or the drum grid), AUTOMATION | SEQ TOOLS, on every page |
+| SEQ | STEP (the piano roll, or the drum grid), DETAIL, AUTOMATION | SEQ TOOLS, on every page |
 | GLO | SONG | the GLO layer (mutes, solos, levels, TAP tempo, D4: MIDI LEARN) |
 | SAVE | USER, PRESETS, PHRASES (the pattern loader), PROJECT, TOOLS | UNDO |
 | LFO | LFO, LFO 2, LFO DEST, MOD | MOMENTARY (with a knob) |
@@ -406,7 +434,8 @@ For more details, see [On AI-Assisted Development and Responsibility](https://gi
   [andreahaku](https://github.com/andreahaku) (sample recording and trim, #29; SLICE manual slices and tests, #27, #22),
   [spinkham](https://github.com/spinkham) (the boot fix for 0.9 projects, #111),
   [zednaked](https://github.com/zednaked) (ratchets, #100),
-  [jasonpersinger](https://github.com/jasonpersinger) (the ROOM reverb click fix, #121)
+  [jasonpersinger](https://github.com/jasonpersinger) (the ROOM reverb click fix, #121),
+  [renebohne](https://github.com/renebohne) (MIDI Program Change, #179)
 
 ## Licence
 

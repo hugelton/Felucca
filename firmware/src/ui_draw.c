@@ -788,7 +788,7 @@ static void draw_foot(void)
         int32_t kw = kh_w(KC_OCTUP, "DONE");
         cv_free_text(8, 2, &AF_S, ln, T_ACCENT, T_BG, 232 - kw - 8 - 8);
         cv_key_row(232 - kw, 232, 2, &kh, 1, 1u, T_BG);
-    } else if (grid_on()) {                           /* row 1: the page, and what the keys do */
+    } else if (grid_on() && !detail_on()) {          /* row 1: the page, and what the keys do (DETAIL: the steps) */
         char b[16];
         uint32_t len = (uint32_t)t->p[P_SLEN];
         str_cpy(b, "PAGE ", sizeof b);
@@ -1084,6 +1084,38 @@ static void draw_columns(void)
         draw_column(2, "DST", mod_dst_name(t, d), "", d ? VAL(2u) : T_DIM, -1, mod_dst_icon(t, d));
         param_format(&TP[id + 2u], a, val, &unit);
         draw_column(3, "AMT", val, unit, a ? VAL(3u) : T_DIM, RATIO(&TP[id + 2u], a), mod_src_icon(MS_OFF));
+        return;
+    }
+    if (detail_on()) {                                  /* DETAIL (1.5.1, #199): the cursor step's CHANCE RATCH NUDGE VEL;
+                                                         * DIM where they do not play (ui_input.c sd_turn) */
+        static const char *const SD_LABEL[4] = {"CHANCE", "RATCH", "NUDGE", "VEL"};
+        const step_t *st = &seq_steps(TSEL)[ui.cursor];
+        for (c = 0; c < 4u; c++) {
+            uint32_t k = SD_KIND[c];
+            int32_t v = ev_sval(st, k), r;
+            int on = sd_takes(st, k);
+            const char *u = "";
+            if (k == EVK_CHANCE) {
+                fmt_int(val, v);
+                u = "%";
+                r = v * 10;
+            } else if (k == EVK_RATCH) {
+                val[0] = 'x';
+                fmt_int(val + 1, v);
+                r = (v - 1) * 1000 / 3;
+            } else if (k == EVK_NUDGE) {
+                ev_nudge_fmt(val, v);
+                u = v ? "/16" : "";
+                r = (v + 8) * 1000 / 15;
+                on &= ev_nudge_plays(TSEL, st);
+            } else {
+                fmt_int(val, v);
+                u = st->flags & SF_ACCENT ? "ACC" : "";
+                r = v * 1000 / 127;
+                on &= !(st->flags & SF_ACCENT);
+            }
+            draw_column(c, SD_LABEL[c], val, u, on ? VAL(c) : T_DIM, r, ICON_AUTO);
+        }
         return;
     }
     if (cur_page()->graph == GR_ROLL && lock_held()) {   /* a step held: what KNOB 1..4 lock (ui_input.c lock_turn) */

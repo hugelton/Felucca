@@ -382,10 +382,15 @@ static void __attribute__((noinline)) midi_route_block(void)
     }
 }
 
+/* Program Change (1.5.1, #179 by renebohne): the track the channel plays (ROUT as for notes) takes program d1. Only
+ * noted here, 0x80 | d1 per track (a later one before the main loop wins): a sound load is the main loop's work
+ * (undo, motion, FM6's patch), never the audio ISR's. ui.mpc (ui.c; a build without the UI: none) */
+static volatile uint8_t *const mpc_io;
+
 /* Keep the occasional controller/panic dispatch outside the hot rendering loop. Channel voice messages only
  * (realtime and clock are handled in events_block, SysEx never reaches here). With ROUT CH1-4 channels
  * 5..16 are ignored entirely (with CH5-8 .. CH13-16 every channel outside the block): notes, bend, CCs (CC1/11/64, RPN, and the CC120/121/123 panic and reset),
- * channel aftertouch, so they stay free for other instruments. */
+ * channel aftertouch, Program Change, so they stay free for other instruments. */
 static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint32_t d1, uint32_t d2)
 {
     if (song.g[G_ROUTE] != 1 && !midi_in_block(ch))
@@ -400,4 +405,6 @@ static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint3
         midi_control(ch, d1, d2);
     } else if (st == 0xD0u)
         mod_midi(midi_track(ch), st, d1, d2);
+    else if (st == 0xC0u && mpc_io)                /* Program Change: the main loop loads it (ui.c midi_pc_poll) */
+        mpc_io[trk_index(midi_track(ch))] = (uint8_t)(0x80u | d1);
 }

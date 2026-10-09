@@ -761,7 +761,9 @@ enum { S_HOME, S_HOME_IDLE, S_MESSAGE, S_MESSAGE_KEY, S_MESSAGE_NOFILE, S_PRESET
        S_MENU_TUNE, S_MENU_INFO, S_HOME_TRACKS, S_HOME_TRACKS_STOPPED, S_HOME_TRACKS_HOT, S_MENU_HOME, S_HOME_LEVELS, S_HELP_HOME, S_HELP_USER, S_HELP_GRID, S_HELP_LFO, S_HELP_GLO, S_HELP_SEQ, S_MENU_HELP,
        S_INSERT_CRUSH, S_INSERT_FOLD, S_INSERT_PHASER, S_INSERT_OFF, S_INSERT_MIX,
        S_ENV_SYNC, S_ENV_DEST_SYNC, S_FILTER,
-       S_LEARN_WAIT, S_LEARN_PICK, S_LEARN_SET, S_LEARN_LONG, S_GLO_LEARN, S_MENU_LCLEAR, S_MENU_LCLEAR_NONE, S_COUNT };
+       S_LEARN_WAIT, S_LEARN_PICK, S_LEARN_SET, S_LEARN_LONG, S_GLO_LEARN, S_MENU_LCLEAR, S_MENU_LCLEAR_NONE,
+       S_DLY_DOT, S_DLY_DOT16, S_FX_THROW,
+       S_DETAIL, S_DETAIL_PLAYING, S_DETAIL_REST, S_DETAIL_DRUM, S_ROLL_MARKS, S_DRUM_MARKS, S_HELP_DETAIL, S_COUNT };
 static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "message_key", "message_nofile", "presets", "presets_nofav", "user",
     "phrases", "project", "tools", "song_empty", "song", "step", "auto_steps", "auto_add_chance", "automation", "drum",
     "drum_hand", "drum_cym", "mixer", "mixer_from_home", "mixer_pan", "env", "env_dest", "lfo", "mod", "fx", "slicer", "dly", "scl", "chord", "chord_wide", "chord_off", "chord_kit", "arp",
@@ -786,7 +788,9 @@ static const char *const S_NAME[S_COUNT] = {"home", "home_idle", "message", "mes
     "menu_tune", "menu_info", "home_tracks", "home_tracks_stopped", "home_tracks_hot", "menu_home", "home_levels", "help_home", "help_user", "help_grid", "help_lfo", "layer_glo_help", "layer_seq_help", "menu_help",
     "insert_crush", "insert_fold", "insert_phaser", "insert_off", "insert_mix",
     "env_sync", "env_dest_sync", "filter",
-    "learn_wait", "learn_pick", "learn_set", "learn_long", "layer_glo_learn", "menu_learn_clear", "menu_learn_clear_none"};
+    "learn_wait", "learn_pick", "learn_set", "learn_long", "layer_glo_learn", "menu_learn_clear", "menu_learn_clear_none",
+    "dly_dotted", "dly_dotted_16", "perform_throw",
+    "detail", "detail_playing", "detail_rest", "detail_drum", "roll_marks", "drum_marks", "help_detail"};
 
 /* the STEP page's piano roll (ui_graph.c graph_roll) on track 1, stopped unless said: an empty pattern; ACID in
  * A minor; POLY chords (Am7 F C G, tied); a line with ties, slides and accents in C major; LEN 32 on its second
@@ -884,6 +888,36 @@ static void roll_scene(int s)
     default: break;
     }
     ui.bank = (uint8_t)(ui.cursor / 16u);
+}
+
+/* 1.5.1 SEQ > DETAIL (#199; ui_graph.c graph_detail): the selected track's steps given CHANCE, RATCH, NUDGE and VEL
+ * (QUANTIZE OFF: the nudges play) on its note steps; a melodic track (ACID) or the DRUM beat (drum_kit) */
+static void detail_values(track_t *t, int drum_kit)
+{
+    static const uint8_t RT[16] = {1, 1, 2, 1, 1, 1, 3, 1, 1, 1, 1, 1, 4, 1, 1, 1};
+    static const int8_t ND[16] = {0, 0, 0, 0, 3, 0, 0, 0, 0, 0, -4, 0, 0, 0, 0, 0};
+    static const uint8_t CH[16] = {100, 100, 100, 100, 100, 100, 60, 100, 100, 25, 100, 100, 100, 100, 80, 100};
+    static const uint8_t VL[16] = {0, 0, 70, 110, 0, 0, 40, 0, 120, 90, 0, 60, 0, 0, 100, 0};
+    uint32_t i;
+    t->p[P_SQNT] = 0;
+    for (i = 0; i < 16u; i++) {
+        step_t *st = &t->step[i];
+        if (st->time != ST_NOTE || (!st->n && !st->hit))
+            continue;
+        step_set_ratchet(st, drum_kit ? (i == 6u ? 2u : i == 12u ? 3u : 1u) : RT[i]);
+        step_set_nudge(st, drum_kit ? 0 : ND[i]);
+        step_set_chance(st, CH[i]);
+        st->vel = VL[i];
+    }
+}
+static void go_title_page(const char *title)
+{
+    uint32_t i;
+    for (i = 0; i < NPAGES && !str_eq(PAGES[i].title, title); i++)
+        ;
+    ui.home = 0;
+    ui.page = (uint8_t)i;
+    page_entered();
 }
 
 /* 1.3, HOME > TRACKS (ui_graph.c draw_home_tracks): T1 LEN 32, a line on its second page; T2 a melody with accents; T3
@@ -1133,6 +1167,14 @@ static void setup(int s)
         break;
     }
     case S_MENU_LCLEAR_NONE: ui.menu = 1; ui.menu_sel = MI_LCLEAR; break;
+    /* 1.5.1: the DLY page with TIME 1/8D (KNOB 1 turned: its gauge) and 1/16D (the widest name); the FX layer's map
+     * with REV THROW (D5, VERB) and ECHO THROW (E5, ECHO) held */
+    case S_DLY_DOT: song.g[G_DTIME] = 10; go_title("DLY"); ui.hot_col = 0; ui.hot_t = 30; break;
+    case S_DLY_DOT16: song.g[G_DTIME] = 11; go_title("DLY"); break;
+    case S_FX_THROW:
+        song.playing = 1; ui.layer = LAYER_FX;
+        perf_held = perf_act = PF_BIT(PF_RTHR) | PF_BIT(PF_ETHR);
+        break;
     case S_MENU_INFO:
         ui.menu = 3; ui.menu_sel = MI_INFO; song.cpu_q8 = 87u;   /* (34 %; USB: the host has none, OFF) */
         info.t = fm1_ms - INFO_CPU_MS;
@@ -1397,6 +1439,33 @@ static void setup(int s)
             fm1_in.notes = 1u << 10;
             ui.hot_col = 0; ui.hot_t = 30;
         }
+        break;
+    /* 1.5.1 SEQ > DETAIL (#199): its lanes on ACID (the cursor on step 7, KNOB 2 RATCH just turned), playing (step 10),
+     * the cursor on a REST (the cards DIM); on the DRUM beat; STEP's roll and the grid with the steps marked (a lock too);
+     * HELP's hint on DETAIL */
+    case S_DETAIL: case S_DETAIL_PLAYING: case S_DETAIL_REST: case S_ROLL_MARKS:
+        roll_scene(s == S_DETAIL_PLAYING ? S_ROLL_PLAYING : S_ROLL_ACID);
+        detail_values(TSEL, 0);
+        if (s == S_ROLL_MARKS) {
+            motion_set_lock(TSEL, 9, P_E5, 110);
+            break;
+        }
+        go_title_page("DETAIL");
+        ui.cursor = s == S_DETAIL_REST ? 5 : 6;
+        if (s == S_DETAIL) { ui.hot_col = 1; ui.hot_t = 30; }
+        break;
+    case S_DETAIL_DRUM: case S_DRUM_MARKS:
+        drum(0); trk[3].seq_idx = 9;
+        detail_values(TSEL, 1);
+        if (s == S_DRUM_MARKS) {
+            go_page(GR_ROLL); ui.cursor = 4; ui.lane = 1;
+            motion_set_lock(TSEL, 4, P_REV, 100);
+            break;
+        }
+        go_title_page("DETAIL"); ui.cursor = 6; ui.hot_col = 0; ui.hot_t = 30;
+        break;
+    case S_HELP_DETAIL:
+        roll_scene(S_ROLL_ACID); ui_prefs2 |= PREF_HELP >> 16; go_title_page("DETAIL");
         break;
     case S_DRUM_LOCKS: case S_DRUM_LOCK_HELD:
         drum(0); go_page(GR_ROLL); ui.cursor = 4; ui.lane = 1; trk[3].seq_idx = 9;

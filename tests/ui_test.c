@@ -830,6 +830,31 @@ static int test_midi(void)
         song.g[G_ROUTE] = r0;
         bad += check("MENU > MIDI > MIDI IN: CH1-4 / SEL / CH5-8 .. CH13-16, the project's ROUT (G_ROUTE)", ok);
     }
+    {   /* #192: PRESETS loads into the selected track for good (no preview): MIDI IN SEL plays it on any channel;
+         * CH1-4 (the default) keeps channel 1 on track 1 whatever is selected, so browsing on T3 is not heard there */
+        uint8_t e1 = trk[0].eng_req, p1 = trk[0].preset, e3, p3;
+        int ok;
+        ui_power_on();
+        song.sel = 2;
+        go_page(GR_BROWSE);
+        e3 = TSEL->eng_req; p3 = TSEL->preset;
+        e1 = trk[0].eng_req; p1 = trk[0].preset;
+        turn(EN_PRESET, 1);
+        turn(EN_PRESET, 1);
+        ok = (TSEL->eng_req != e3 || TSEL->preset != p3) && trk[0].eng_req == e1 && trk[0].preset == p1;
+        song.g[G_ROUTE] = 1;                             /* SEL */
+        midi_event(0x90, 0, 60, 100);
+        ok &= gated_notes(&trk[2]) == 1u && !gated_notes(&trk[0]) && midi_sel_on[0][60] == 3u;
+        midi_event(0x80, 0, 60, 0);
+        song.g[G_ROUTE] = 0;                             /* CH1-4 */
+        midi_event(0x90, 0, 60, 100);
+        ok &= gated_notes(&trk[0]) == 1u && !gated_notes(&trk[2]) && midi_sel_on[0][60] == 1u;
+        midi_event(0x80, 0, 60, 0);
+        midi_event(0x90, 2, 62, 100);                    /* (CH1-4: channel 3 is T3's) */
+        ok &= gated_notes(&trk[2]) == 1u && midi_sel_on[2][62] == 3u;
+        midi_event(0x80, 2, 62, 0);
+        bad += check("#192 PRESETS on T3: MIDI IN SEL plays the loaded sound, CH1-4 channel 1 stays T1 (channel 3 T3)", ok);
+    }
     return bad;
 }
 
@@ -1443,6 +1468,28 @@ static int test_categories(void)
         bad += check("  kept with the settings ([15][11], an unknown value: none); FAV clears it, ALL at the left end",
                      ok && list_mode() == 1u && favorites.filter == 1u && ui_lcat == 0u);
         turn(EN_K4, -1);
+    }
+    {   /* #197: LIST / FAV not written on every detent (a flash erase stops the LED scan: the whole panel flashed) */
+        uint32_t m0 = list_mode();
+        int ok2;
+        set_later.on = 0;
+        frames(200);
+        turn(EN_K4, 1);
+        ok = set_later.on && list_mode() == m0 + 1u;
+        turn(EN_K4, 1);
+        turn(EN_K3, 1);
+        frames(3000);
+        ok &= set_later.on;                                /* (still on PRESETS, touched 3 s ago: not yet) */
+        frames(SET_LATER_MS);
+        ok &= !set_later.on;                               /* idle: written */
+        turn(EN_K4, -2);
+        turn(EN_K3, -1);
+        ok2 = set_later.on && list_mode() == m0;
+        go_page(GR_FX);                                    /* the page left: written at once */
+        frame();
+        ok2 &= !set_later.on;
+        go_page(GR_BROWSE);
+        bad += check("  #197 LIST / FAV (KNOB 4 / 3): saved once idle or the page left, never on a detent", ok && ok2);
     }
     /* NAME: USER SAVE takes the sound's category; KNOB 3 changes it; written with the name */
     select_engine(0);
@@ -2572,7 +2619,7 @@ static int test_presets_knob(void)
             }
         }
     }
-    bad += check("#92 PRESETS on STEP: the step cursor; the sound and the steps stay", cur_ok && n_cur == 1u);
+    bad += check("#92 PRESETS on STEP (and 1.5.1's DETAIL): the step cursor; the sound and the steps stay", cur_ok && n_cur == 2u);
     bad += check("#94 PRESETS on USER, PROJECT, PHRASES, SONG, AUTOMATION: the selection (KNOB 1's); nothing loaded", sel_ok);
     bad += check("#94 PRESETS on TOOLS does nothing", tools_ok);
     bad += check("#94 PRESETS elsewhere (EDIT, ENV, LFO, FX, SCL, ARP, MIXER, GLOBAL, ...): the next sound, the steps stay",
@@ -3144,9 +3191,11 @@ static int test_layer(void)
     key_up(white(9)); key_down(white(10)); frame();
     ok &= perf_held == PF_BIT(PF_FLG) && (kb_layer >> white(10)) & 1u && !gates();   /* (1.2: B4 FLANGER, C5 PHASER) */
     key_up(white(10)); key_down(white(12)); frame();
-    ok &= !perf_held && (kb_layer >> white(12)) & 1u && !gates();
-    key_up(white(12)); btn_up(B_FX); frame();
-    bad += check("FX + G4 / A4: OCT UP / OCT DN held, silent, no MIDI; KNOB 4 turns; B4 FLANGER, D5 nothing; FX let go: K4 0",
+    ok &= perf_held == PF_BIT(PF_RTHR) && (kb_layer >> white(12)) & 1u && !gates();   /* (1.5.1: D5 REV THROW) */
+    key_up(white(12)); key_down(white(14)); frame();
+    ok &= !perf_held && (kb_layer >> white(14)) & 1u && !gates();
+    key_up(white(14)); btn_up(B_FX); frame();
+    bad += check("FX + G4 / A4: OCT UP / OCT DN held, silent, no MIDI; KNOB 4 turns; B4 FLANGER, D5 REV THROW, F5 nothing; FX let go: K4 0",
                  ok && !perf_held && !ui.layer && !perf_k[3] && mo_w == mo);
     /* REVERB > TYPE (FX family, global): ROOM / SPRING / HALL on KNOB 1 (HALL at power-on since 1.2), kept by a
      * project */
@@ -3270,9 +3319,9 @@ static int test_layer(void)
         a = leds_at(0); b2 = leds_at(250);
         k = white(1);
         ok = ((a >> k) & 1u) && ((b2 >> k) & 1u);                    /* held: lit */
-        for (i = 0; i < 12u; i++)                                     /* the other effects (F3 .. C5): breathe */
+        for (i = 0; i < 14u; i++)                                     /* the other effects (F3 .. E5): breathe */
             ok &= i == 1u || ((a ^ b2) >> white(i)) & 1u;
-        for (i = 12; i < 16u; i++)                                    /* D5 .. G5: no effect, dark */
+        for (i = 14; i < 16u; i++)                                    /* F5 G5: no effect, dark */
             ok &= !((a | b2) >> white(i) & 1u);
         ok &= ((a ^ b2) >> key_at(1, 0)) & 1u && !((a | b2) >> key_at(1, 4) & 1u);   /* a mute breathes, a spare black dark */
         song.g[G_BPM] = 72;
@@ -3282,7 +3331,7 @@ static int test_layer(void)
         song.g[G_BPM] = 120;
     }
     key_up(white(1)); btn_up(B_FX); frame();
-    bad += check("map LEDs: held lit, the 12 effects breathe, D5 .. G5 and a too-long REPEAT dark", ok);
+    bad += check("map LEDs: held lit, the 14 effects breathe (1.5.1: D5 E5 the throws), F5 G5 and a too-long REPEAT dark", ok);
     usb.config = 0;
     return bad;
 }
@@ -5763,6 +5812,28 @@ static int test_momentary(void)
     ok = !mom.n;
     btn_up(B_LFO); frame();
     bad += check("  on STEP (and the action pages, the lists) the knobs act as ever", ok && cur_page()->graph == GR_ROLL);
+    /* #195: MIXER's LEVEL PAN REV MUTE (the selected track's) are momentary too, as on HOME LEVELS and the FX page */
+    go_page(GR_TRK); frame();
+    {
+        int16_t lv = TSEL->p[P_LEVEL], pn = TSEL->p[P_PAN], rv = TSEL->p[P_REV], mu = TSEL->p[P_MUTE];
+        song.playing = 1; song.rec = 1u << song.sel;
+        k = motion.count;
+        btn_down(B_LFO); frame();
+        turn(EN_K1, -5);
+        turn(EN_K2, 7);
+        turn(EN_K3, 9);
+        turn(EN_K4, 1);
+        ok = TSEL->p[P_LEVEL] != lv && TSEL->p[P_PAN] != pn && TSEL->p[P_REV] != rv && TSEL->p[P_MUTE] != mu &&
+             mom.n == 4u && motion.count == k;
+        btn_up(B_LFO); frame();
+        song.playing = 0; song.rec = 0;
+        ok &= TSEL->p[P_LEVEL] == lv && TSEL->p[P_PAN] == pn && TSEL->p[P_REV] == rv && TSEL->p[P_MUTE] == mu &&
+              !mom.n && cur_page()->graph == GR_TRK && msg_is("BACK");
+        turn(EN_K3, 4);                            /* (without LFO: a turn stays) */
+        ok &= TSEL->p[P_REV] != rv && !mom.n;
+        TSEL->p[P_REV] = rv;
+        bad += check("  #195 MIXER: LEVEL PAN REV MUTE momentary (not recorded), back on release; without LFO they stay", ok);
+    }
     /* a layer: its knobs */
     go_home();
     v0 = TSEL->p[id0];
@@ -6517,12 +6588,16 @@ static int test_seq_tools(void)
     ui_power_on();
     go_page(GR_ROLL); frame();
     press(B_SEQ); frames(320);
-    ok = cur_page()->graph == GR_EVENTS && str_eq(cur_page()->title, "AUTOMATION") && msg_is("HOLD [SEQ] QUICK");
+    ok = str_eq(cur_page()->title, "DETAIL") && msg_is("HOLD [SEQ] QUICK");   /* (1.5.1, #199) */
     press(B_SEQ); frames(320);
-    ok &= cur_page()->graph == GR_ROLL;
+    ok &= cur_page()->graph == GR_EVENTS && str_eq(cur_page()->title, "AUTOMATION");
+    press(B_SEQ); frames(320);
+    ok &= str_eq(cur_page()->title, "STEP");
+    press(B_SEQ); frames(320);
     press(B_SEQ); frames(320);
     ok &= cur_page()->graph == GR_EVENTS;
-    bad += check("1.2: a tap on STEP: AUTOMATION, then STEP again (two SEQ pages; the hint until the layer was opened)", ok);
+    bad += check("1.2: a tap on STEP: DETAIL (1.5.1), AUTOMATION, then STEP again (three SEQ pages; the hint until the layer "
+                 "was opened)", ok);
     go_title("ENV"); frame();
     press(B_SEQ); frames(320);
     ok = cur_page()->graph == GR_EVENTS;                /* (the SEQ page shown last) */
@@ -6867,6 +6942,8 @@ static int test_layer_lock(void)
     press(B_SEQ); frames(400);                          /* (1.2: SEQ, GLO's one page cycles no more) */
     ok = str_eq(cur_page()->title, "STEP") && !ui.lock;
     press(B_SEQ); frames(400);
+    ok &= str_eq(cur_page()->title, "DETAIL") && !ui.lock && !ui.layer;   /* (1.5.1) */
+    press(B_SEQ); frames(400);
     ok &= str_eq(cur_page()->title, "AUTOMATION") && !ui.lock && !ui.layer;
     press(B_SEQ);
     btn_down(B_SEQ); frames(500);
@@ -7153,20 +7230,24 @@ static int test_fx_map(void)
     frame();
     for (ok = 1, p = 0; p < PF_KEYS; p++)
         ok &= perf_map[p] == PF_DEF[p];
-    bad += check("FX map: settings of 0 (before 1.2) are the default: 1.1.5's ten keys, B4 FLANGER, C5 PHASER", ok);
+    bad += check("FX map: settings of 0 (before 1.2) are the default: 1.1.5's ten keys, B4 FLANGER, C5 PHASER, D5 E5 the throws", ok);
     snd = TSEL->preset | (uint32_t)TSEL->eng_req << 8;
     btn_down(B_FX); key_down(b4); frame();
     ok = perf_held == PF_BIT(PF_FLG) && ui.layer == LAYER_FX;
     turn(EN_PRESET, 1); keyboard_block();               /* (keyboard_block: the ISR's next block) */
     ok &= perf_map[10] == PF_PHS && perf_held == PF_BIT(PF_PHS) && msg_is("B4 PHASER");
+    turn(EN_PRESET, 1); keyboard_block();               /* 1.5.1: the throws, after PHASER */
+    ok &= perf_map[10] == PF_RTHR && perf_held == PF_BIT(PF_RTHR) && msg_is("B4 REV THROW");
+    turn(EN_PRESET, 1); keyboard_block();
+    ok &= perf_map[10] == PF_ETHR && perf_held == PF_BIT(PF_ETHR) && msg_is("B4 ECHO THROW");
     turn(EN_PRESET, 1); keyboard_block();               /* past the last: NONE */
     ok &= perf_map[10] == PF_N && !perf_held && msg_is("B4 NONE") && (kb_layer >> b4) & 1u;
     turn(EN_PRESET, 1); keyboard_block();               /* round: the first */
     ok &= perf_map[10] == PF_R8 && perf_held == PF_BIT(PF_R8);
-    turn(EN_PRESET, -1); turn(EN_PRESET, -1); keyboard_block();
+    turn(EN_PRESET, -1); turn(EN_PRESET, -1); turn(EN_PRESET, -1); turn(EN_PRESET, -1); keyboard_block();
     ok &= perf_map[10] == PF_PHS && perf_held == PF_BIT(PF_PHS) && lys.rp_dirty;
     ok &= (TSEL->preset | (uint32_t)TSEL->eng_req << 8) == snd && !gates();
-    bad += check("  FX + B4 held + PRESETS: PHASER, NONE, round to REPEAT 1/8 and back, each held at once; no sound load", ok);
+    bad += check("  FX + B4 held + PRESETS: PHASER, REV THROW, ECHO THROW, NONE, round to REPEAT 1/8 and back, each held at once; no sound load", ok);
     btn_down(B_EDIT); frame(); btn_up(B_EDIT); frame(); keyboard_block();
     ok = perf_map[10] == PF_FLG && perf_held == PF_BIT(PF_FLG) && msg_is("B4 FLANGER (DEF)") && ui.layer == LAYER_FX;
     bad += check("  EDIT with the key held: its default (FLANGER) back, the layer open", ok);
@@ -7218,8 +7299,9 @@ static int test_fx_map(void)
     ok &= !ui.lock && !perf_held;
     bad += check("  locked (FX double tap): G3 held + PRESETS: REPEAT 1/32; EDIT: 1/16, the lock stays; no key: EDIT closes it", ok);
     {   /* the cells name what the keys hold: G3 "1/8" now, B4 FLNG */
-        ok = str_eq(PF_CELL[perf_map[1]], "1/8") && str_eq(PF_CELL[perf_map[10]], "FLNG") && perf_map[12] == PF_N;
-        bad += check("  the map's cells: G3 1/8 (remapped), B4 FLNG, D5 empty", ok);
+        ok = str_eq(PF_CELL[perf_map[1]], "1/8") && str_eq(PF_CELL[perf_map[10]], "FLNG") && str_eq(PF_CELL[perf_map[12]], "VERB") &&
+             str_eq(PF_CELL[perf_map[13]], "ECHO") && perf_map[14] == PF_N;
+        bad += check("  the map's cells: G3 1/8 (remapped), B4 FLNG, D5 VERB, E5 ECHO (1.5.1's throws), F5 empty", ok);
     }
     memset(fx_keys, 0, 10);
     frame();
@@ -7371,7 +7453,8 @@ static int test_div_order(void)
         uint32_t prev = 0xFFFFFFFFu, len;
         for (n = 0; n < 40; n++) v = param_turn(d, v, -1);
         for (n = 0; n <= d->max - d->min; n++) {
-            len = d->names == N_SLDIV ? 1000000u / SL_DEN[v] : div_samples((uint32_t)v);
+            len = d->names == N_SLDIV ? 1000000u / SL_DEN[v] : v >= 10 ? (beat_samples() * 3u) >> DIV_DOT[v - 10] :
+                  div_samples((uint32_t)v);                     /* (TIME's dotted ones, 1.5.1: fx.c delay_samples) */
             if (!(len < prev && enum_rank(d, v) == d->min + n && !((seen >> v) & 1))) {
                 printf("  %s: %s (value %d, place %d, length %u) after %u\n", d->label, d->names[v], (int)v,
                        (int)enum_rank(d, v), len, prev);
@@ -7398,11 +7481,11 @@ static int test_div_order(void)
             if (!page_visible(id) || !(d = page_desc(cur_page(), c, &vp)) || !vp || !enum_order(d))
                 continue;
             found++;
-            *vp = d->names == N_DIV ? 2 : 1;        /* 1/16 */
+            *vp = d->names != N_SLDIV ? 2 : 1;      /* 1/16 */
             turn(EN_K1 + c, 1);
-            ok &= *vp == (d->names == N_DIV ? 5 : 4);  /* 16T */
+            ok &= *vp == (d->names != N_SLDIV ? 5 : 4);  /* 16T */
             turn(EN_K1 + c, -2);
-            ok &= *vp == (d->names == N_DIV ? 4 : 3);  /* 8T */
+            ok &= *vp == (d->names != N_SLDIV ? 4 : 3);  /* 8T */
         }
     ui_power_on();                                  /* SEQ's DIV: SEQ TOOLS' KNOB 2 (1.2: the PATTERN page is gone) */
     go_page(GR_ROLL); frame();

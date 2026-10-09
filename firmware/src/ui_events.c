@@ -477,6 +477,12 @@ static void ev_oct(void)
     }
 }
 
+/* SEQ > DETAIL (1.5.1, #199; ui_input.c sd_turn, ui_draw.c, ui_graph.c graph_detail): KNOB 1..4 are these fields of
+ * the cursor step, the ones the rows above list (one storage). A step takes them where they play: a NOTE step (notes or
+ * hits); CHANCE a TIE too (a failed roll cuts the held note). A REST or an empty step none (nothing to hear) */
+static const uint8_t SD_KIND[4] = {EVK_CHANCE, EVK_RATCH, EVK_NUDGE, EVK_VEL};
+static int sd_takes(const step_t *s, uint32_t k) { return step_on(s) || (k == EVK_CHANCE && s->time == ST_TIE); }
+
 /* EDIT: the record goes, a CHANCE / RATCH / NUDGE / VEL back to its default (the row below moves up) */
 static void ev_delete(void)
 {

@@ -31,7 +31,13 @@
  * 11. the key map (perform.c perf_map_of / perf_map_put, seq.c): 0 = the default; any effect or NONE on any key, the
  *    others kept; the keys of a remapped layer; a key remapped while held takes its new effect; two keys with one
  *    effect; FX LATCH follows a remap; the default map on the keys.
- * Demos (WAV) into DEMO_DIR; with a second directory, the harmonizer's (a melody with OCT UP, OCT DN, and
+ * 12. 1.5.1: the delay's TIME 1/8D 1/16D 1/4D (their lengths at 60 61 90 120 BPM and on the external clock, 1/4D clamped
+ *    to the line at 60 BPM and below, the list append-only and longest first on the knob, ARP RATE / SEQ DIV unchanged, an
+ *    echo at 1/8D where it belongs); REV THROW / ECHO THROW: every track's reverb / delay send as at 127 while held, the
+ *    other bus untouched, the glide (11.6 ms, bounded steps) in and out, ECHO THROW's feedback 0 -> 0.7 and one above
+ *    left alone, bounded on full-scale squares and dying away, the reverb tail ringing out after the release, idle
+ *    again after it, assignable (key map codes 14 / 15, D5 / E5 by default), the tracks' values never touched.
+ * Demos (WAV) into DEMO_DIR; with a third directory 1.5.1's throws (the loop dry, ECHO THROW at 1/8D, REV THROW); with a second directory, the harmonizer's (a melody with OCT UP, OCT DN, and
  * OCT UP with the shimmer) and FLANGER's and PHASER's (a loop plain, then with each) into it. */
 #define main hostsim_main
 #include "hostsim.c"
@@ -418,8 +424,8 @@ static int test_keys(void)
             ok &= !kb_layer && !perf_held && mo_w == mo0;
         }
         fm1_in.buttons = 0;
-        bad += check("the keys without an effect (4 white from D5, 7 black from D#4): silent, nothing held",
-                     ok && assigned == 0xD5BFFu);   /* F3 .. C5 but D#4 F#4 G#4 A#4 */
+        bad += check("the keys without an effect (F5 G5, 8 black from D#4): silent, nothing held",
+                     ok && assigned == 0xAD5BFFu);  /* F3 .. C5 but D#4 F#4 G#4 A#4, D5, E5 (1.5.1's throws) */
         kb_mask = perf_mask = 0;
     }
     usb.config = 0;
@@ -908,8 +914,9 @@ static int test_map(void)
     memset(b, 0, sizeof b);
     for (p = 0; p < PF_KEYS; p++)                       /* all 0 (every setting before 1.2): the default */
         ok &= perf_map_of(b, p) == PF_DEF[p];
-    bad += check("map: settings of 0 (before 1.2) read as the default (1.1.5's ten, FLANGER, PHASER, 4 none)",
-                 ok && PF_DEF[10] == PF_FLG && PF_DEF[11] == PF_PHS && PF_DEF[12] == PF_N && PF_DEF[0] == PF_R8);
+    bad += check("map: settings of 0 (before 1.2) read as the default (1.1.5's ten, FLANGER, PHASER, the throws, 2 none)",
+                 ok && PF_DEF[10] == PF_FLG && PF_DEF[11] == PF_PHS && PF_DEF[12] == PF_RTHR && PF_DEF[13] == PF_ETHR &&
+                 PF_DEF[14] == PF_N && PF_DEF[0] == PF_R8);
     ok = 1;
     for (p = 0; p < PF_KEYS; p++)                       /* any effect (or none) on any key, the others untouched */
         for (e = 0; e <= PF_NFX; e++) {
@@ -953,7 +960,7 @@ static int test_map(void)
             ok &= !perf_held && !kb_layer;
             white++;
         }
-        bad += check("keys: a remapped layer (white key p holds effect 11 - p, the last 4 none), all 16 white keys", ok && white == 16u);
+        bad += check("keys: a remapped layer (white key p holds effect 13 - p, the last 2 none), all 16 white keys", ok && white == 16u);
         /* remapped while held: the key takes the new effect at once, the old one let go */
         fm1_in.notes = 1u << 0;                         /* F3 */
         keyboard_block();
@@ -1007,16 +1014,356 @@ static int test_map(void)
         fm1_in.buttons = 0;
         kb_mask = perf_mask = 0;
     }
-    snprintf(what, sizeof what, "map: the default map on the keys: F3 .. A4 as 1.1.5, B4 FLANGER, C5 PHASER");
+    snprintf(what, sizeof what, "map: the default map on the keys: F3 .. A4 as 1.1.5, B4 FLANGER, C5 PHASER, D5 E5 REV / ECHO THROW");
     {
         uint32_t k;
         ok = 1;
         for (k = 0; k < 27u; k++)
             if (!key_black(k))
                 ok &= perf_key(k) == (key_place(k) < PF_KEYS ? PF_DEF[key_place(k)] : PF_N);
-        ok &= perf_key(18) == PF_FLG && perf_key(19) == PF_PHS && perf_key(16) == PF_ODN;
+        ok &= perf_key(18) == PF_FLG && perf_key(19) == PF_PHS && perf_key(16) == PF_ODN && perf_key(21) == PF_RTHR &&
+              perf_key(23) == PF_ETHR && perf_key(24) == PF_N;
     }
     bad += check(what, ok);
+    return bad;
+}
+
+/* ------------------------------- 12. the delay's dotted TIME, REV / ECHO THROW (1.5.1) --- */
+/* the delay bus alone (fx_buses with the chorus and reverb inputs silent and their lines cleared): dly_in -> wet */
+static void dly_clear(void)
+{
+    memset(dly_buf, 0, sizeof dly_buf);
+    memset(cho_buf, 0, sizeof cho_buf);
+    memset(rev_comb, 0, sizeof rev_comb);
+    memset(&rev_u, 0, sizeof rev_u);
+    memset(&fx, 0, sizeof fx);
+    song.g[G_RTYPE] = 0;
+}
+static void dly_run(const int32_t *in, int32_t *wet_out, uint32_t frames)
+{
+    static int32_t z[CTL], w[CTL];
+    uint32_t t, i;
+    for (t = 0; t < frames; t += CTL) {
+        fx_buses(z, in + t, z, w, CTL);
+        for (i = 0; i < CTL; i++)
+            wet_out[t + i] = w[i];
+    }
+}
+/* fn run in a child from this state (the noise / RAND seeds as they are here: renders compared bit for bit start
+ * alike), its n bytes at buf back */
+static void in_child(void (*fn)(void), void *buf, size_t n)
+{
+    int fd[2];
+    pid_t pid;
+    FILE *f;
+    if (pipe(fd) || (pid = fork()) < 0)
+        return;
+    if (!pid) {
+        close(fd[0]);
+        fn();
+        if (write(fd[1], buf, n) < 0)
+            _exit(1);
+        _exit(0);
+    }
+    close(fd[1]);
+    f = fdopen(fd[0], "rb");
+    if (fread(buf, 1, n, f) != n)
+        memset(buf, 0x55, n);
+    fclose(f);
+    waitpid(pid, 0, 0);
+}
+/* the song with every track's REV / DLY (-1: 0 40 127 90 / 0 20 127 64), effect e pressed at sample `press`: each
+ * sample's send_r / send_d (sr_a, sd_a), rendered in a child */
+static int32_t sr_a[2u * (FS + CTL)];
+#define sd_a (sr_a + FS + CTL)
+static uint32_t sr_frames, sr_press, sr_e;
+static int32_t sr_rev, sr_dly;
+static void sends_child(void);
+static void sends_render(uint32_t frames, int32_t rev, int32_t dly, uint32_t press, uint32_t e)
+{
+    sr_frames = frames;
+    sr_rev = rev;
+    sr_dly = dly;
+    sr_press = press;
+    sr_e = e;
+    in_child(sends_child, sr_a, sizeof sr_a);
+}
+static void sends_child(void)
+{
+    static const int32_t REVS[4] = {0, 40, 127, 90}, DLYS[4] = {0, 20, 127, 64};
+    uint32_t t, i, k, frames = sr_frames, press = sr_press, e = sr_e;
+    int32_t o[2 * CTL], rev = sr_rev, dly = sr_dly;
+    song_setup();
+    for (k = 0; k < NTRK; k++) {
+        trk[k].p[P_REV] = (int16_t)(rev < 0 ? REVS[k] : rev);
+        trk[k].p[P_DLY] = (int16_t)(dly < 0 ? DLYS[k] : dly);
+    }
+    transport_req = 1;
+    for (t = 0; t < frames; t += CTL) {
+        if (t == press)
+            perf_press(e, 1);
+        mix_block(o, CTL);
+        for (i = 0; i < CTL; i++) {
+            sr_a[t + i] = send_r[i];
+            sd_a[t + i] = send_d[i];
+        }
+    }
+    transport_req = 2;
+    mix_block(o, CTL);
+}
+static int test_throw(void)
+{
+    static const uint8_t MUL[13][2] = {{1, 1}, {1, 2}, {1, 4}, {1, 8}, {1, 3}, {1, 6}, {2, 1}, {4, 1}, {8, 1}, {16, 1},
+                                       {3, 4}, {3, 8}, {3, 2}};   /* N_DTIME: a quarter x a / b */
+    static const uint32_t BPM[4] = {60, 61, 90, 120};
+    static int32_t in[8u * FS], w0[8u * FS];
+    char what[200];
+    int bad = 0, ok = 1;
+    uint32_t b, v, t, i;
+    /* the TIME values' lengths */
+    song.g[G_CLOCK] = 0;
+    for (b = 0; b < 4u; b++) {
+        song.g[G_BPM] = (int16_t)BPM[b];
+        for (v = 0; v < 13u; v++) {
+            uint32_t q = FS * 60u / BPM[b], want = v < 10u ? (MUL[v][0] * q) / MUL[v][1] : (MUL[v][0] * q) >> (v == 10u ? 2 : v == 11u ? 3 : 1);
+            song.g[G_DTIME] = (int16_t)v;
+            want = want >= DLY_LEN ? DLY_LEN - 1u : want;
+            ok &= delay_samples() == want;
+        }
+    }
+    song.g[G_BPM] = 120;
+    song.g[G_DTIME] = 10;
+    ok &= delay_samples() == 16537u;                   /* 1/8D at 120: 375 ms */
+    song.g[G_DTIME] = 11;
+    ok &= delay_samples() == 8268u;                    /* 1/16D: 187.5 ms */
+    song.g[G_DTIME] = 12;
+    ok &= delay_samples() == 33075u;                   /* 1/4D: 750 ms */
+    bad += check("TIME: the ten as before, 1/8D 1/16D 1/4D 3/4 3/8 3/2 of a quarter at 60 61 90 120 BPM", ok);
+    song.g[G_BPM] = 61;
+    ok = delay_samples() == 65065u;                   /* 1/4D at 61: 1.475 s, fits */
+    song.g[G_BPM] = 60;
+    ok &= delay_samples() == DLY_LEN - 1u;             /* at 60 (66150): the line's length, 1.486 s */
+    song.g[G_BPM] = 40;
+    ok &= delay_samples() == DLY_LEN - 1u;
+    song.g[G_CLOCK] = 1;
+    midi_beat_samples = 30000u;                         /* an external clock's quarter */
+    ok &= delay_samples() == 45000u;
+    midi_beat_samples = 0;
+    song.g[G_CLOCK] = 0;
+    song.g[G_BPM] = 120;
+    bad += check("TIME 1/4D: fits from 61 BPM, clamps to 65535 samples at 60 and below; the external clock's quarter", ok);
+    {   /* the list: append-only, its own; the knob longest first; ARP RATE / SEQ DIV keep ten */
+        const param_desc_t *d = &GP[G_DTIME];
+        static const uint8_t SHOWN[13] = {9, 8, 7, 6, 12, 0, 10, 1, 11, 4, 2, 5, 3};
+        int32_t x = 9;
+        ok = d->max == 12 && d->names[1][0] == '1' && d->names[1][2] == '8' && !d->names[1][3] && d->names[9][0] == '4' &&
+             TP[P_ARATE].max == 9 && TP[P_SDIV].max == 9 && TP[P_ARATE].names == TP[P_SDIV].names;
+        for (v = 0; v < 13u; v++) {
+            ok &= x == SHOWN[v];
+            x = param_turn(d, x, 1);
+        }
+        ok &= x == 3 && param_turn(d, 0, -1) == 12 && param_turn(d, 0, 1) == 10;
+        bad += check("TIME list: 10 1/8D, 11 1/16D, 12 1/4D appended; knob 4BAR .. 1/2 1/4D 1/4 1/8D 1/8 1/16D 8T .. 1/32", ok);
+    }
+    {   /* the delay itself at 1/8D: a burst comes back 16537 samples later */
+        uint32_t first = 0;
+        host_tracks_init();
+        dly_clear();
+        song.g[G_BPM] = 120;
+        song.g[G_DTIME] = 10;
+        song.g[G_DFDBK] = 0;
+        song.g[G_DMIX] = 127;
+        memset(in, 0, sizeof in);
+        for (t = 0; t < 64u; t++)
+            in[t] = 20000;
+        dly_run(in, w0, FS);
+        for (t = 0; t < FS && !first; t++)
+            if (abs(w0[t]) > 5000)
+                first = t;
+        snprintf(what, sizeof what, "the delay at 1/8D, 120 BPM: the echo %u samples after the input (16537)", first);
+        bad += check(what, first == 16537u);
+    }
+    /* ECHO THROW's feedback: FDBK 0 lifted to 0.7 while held; one above 0.7 left alone; bounded and dying away */
+    {
+        double r_off, r_on;
+        uint32_t p = 5512u;                             /* 1/16 at 120 */
+        int32_t pk1, pk4, tail, drive;
+        host_tracks_init();
+        song.g[G_BPM] = 120;
+        song.g[G_DTIME] = 2;
+        song.g[G_DFDBK] = 0;
+        song.g[G_DCOLOR] = 127;
+        song.g[G_DMIX] = 127;
+        memset(in, 0, sizeof in);
+        for (t = 0; t < 1000u; t++)
+            in[t] = 20000;
+        perf_reset();
+        dly_clear();
+        dly_run(in, w0, 3u * p + CTL);
+        r_off = (double)w0[2u * p + 500u] / (double)w0[p + 500u];
+        pf.ew1 = 32768;                                 /* held (perf_begin's share at the block's end) */
+        dly_clear();
+        dly_run(in, w0, 3u * p + CTL);
+        r_on = (double)w0[2u * p + 500u] / (double)w0[p + 500u];
+        song.g[G_DFDBK] = 120;                          /* 0.84: above 0.7, as it is */
+        {
+            int32_t fb = song.g[G_DFDBK] * 230, f2 = fb;
+            if (pf.ew1 && f2 < THR_FB)
+                f2 += mulq16(THR_FB - f2, (uint32_t)pf.ew1 << 1);
+            ok = f2 == fb;
+        }
+        snprintf(what, sizeof what, "ECHO THROW: FDBK 0 -> repeat ratio %.3f, held %.3f (0.7); FDBK 120 left as it is", r_off, r_on);
+        bad += check(what, fabs(r_off) < 0.01 && r_on > 0.66 && r_on < 0.71 && ok);
+        /* full-scale squares into the delay for 4 s at FDBK 120 and 90 with ECHO THROW held, then silence */
+        for (v = 0; v < 2u; v++) {
+            song.g[G_DFDBK] = v ? 90 : 120;
+            for (t = 0; t < 8u * FS; t++)
+                in[t] = t < 4u * FS ? ((t / 50u) & 1u ? 1 << 22 : -(1 << 22)) : 0;
+            dly_clear();
+            pf.ew1 = 32768;
+            dly_run(in, w0, 4u * FS);
+            pf.ew1 = 0;                                 /* let go */
+            dly_run(in + 4u * FS, w0 + 4u * FS, 4u * FS);
+            pk1 = peak(w0, 0, FS);
+            pk4 = peak(w0, 3u * FS, 4u * FS);
+            drive = peak(w0, FS, 4u * FS);
+            tail = peak(w0, 7u * FS + FS / 2u, 8u * FS);
+            snprintf(what, sizeof what, "  FDBK %d + ECHO THROW on 4x full-scale squares: peak %d .. %d (no growth), 3.5 s after: %d",
+                     v ? 90 : 120, pk1, pk4, tail);
+            bad += check(what, drive <= 2 * 32767 && pk4 <= pk1 + pk1 / 50 && tail < drive / 100);
+        }
+        perf_reset();
+    }
+    /* REV THROW / ECHO THROW on the song: the sends as at 127, the glide, back bit for bit, the tail */
+    {
+        static int32_t sr_ref[FS + CTL], sd_ref[FS + CTL], sr_off[FS + CTL], sd_off[FS + CTL];
+        uint32_t frames = FS, press = 8192u, diff_r = 0, diff_d = 0, off_d = 0;
+        int32_t mx = 0;
+        sends_render(frames, 127, 127, ~0u, 0);         /* every track's sends at 127 */
+        memcpy(sr_ref, sr_a, sizeof sr_ref);
+        memcpy(sd_ref, sd_a, sizeof sd_ref);
+        sends_render(frames, -1, -1, ~0u, 0);           /* their own (0 40 127 90 / 0 20 127 64) */
+        memcpy(sr_off, sr_a, sizeof sr_off);
+        memcpy(sd_off, sd_a, sizeof sd_off);
+        sends_render(frames, -1, -1, press, PF_RTHR);   /* REV THROW from 186 ms */
+        for (t = 0; t < frames; t++) {
+            if (t < press)
+                diff_r += sr_a[t] != sr_off[t];
+            else if (t >= press + 512u + CTL)
+                mx = abs(sr_a[t] - sr_ref[t]) > mx ? abs(sr_a[t] - sr_ref[t]) : mx;
+            off_d += sd_a[t] != sd_off[t];
+        }
+        snprintf(what, sizeof what, "REV THROW: the reverb send as with every REV at 127 (within %d), the delay's untouched", mx);
+        bad += check(what, !diff_r && mx <= 3 && !off_d);
+        mx = 0;
+        sends_render(frames, -1, -1, press, PF_ETHR);
+        for (t = press + 512u + CTL; t < frames; t++)
+            mx = abs(sd_a[t] - sd_ref[t]) > mx ? abs(sd_a[t] - sd_ref[t]) : mx;
+        for (t = 0; t < frames; t++)
+            diff_d += sr_a[t] != sr_off[t];
+        snprintf(what, sizeof what, "ECHO THROW: the delay send as with every DLY at 127 (within %d), the reverb's untouched", mx);
+        bad += check(what, mx <= 3 && !diff_d);
+    }
+    {   /* the glide: a steady signal on one track, its sends at 0: up to full and back, THR_SLOPE a sample */
+        static int32_t b1[CTL], sd[CTL], sr[CTL];
+        int32_t prev = 0, full, maxstep = 0, last = 0;
+        uint32_t up = 0, down = 0, k;
+        track_t *tk = &trk[0];
+        host_tracks_init();
+        perf_reset();
+        tk->p[P_REV] = tk->p[P_DLY] = 0;
+        for (i = 0; i < CTL; i++)
+            b1[i] = 40000;
+        full = mulq15(((40000 >> 2) * LEVEL_Q12[tk->p[P_LEVEL] & 127]) >> 10, 32766);
+        ok = 1;
+        for (t = 0; t < 4096u; t += CTL) {
+            if (t == 0)
+                perf_press(PF_RTHR, 1);
+            if (t == 2048u)
+                perf_press(PF_RTHR, 0);
+            perf_begin(CTL);
+            memset(sd, 0, sizeof sd);
+            memset(sr, 0, sizeof sr);
+            if (pf.thr)
+                perf_throw(tk, b1, sd, sr, CTL);
+            for (i = 0; i < CTL; i++) {
+                int32_t s = abs(sr[i] - prev);
+                maxstep = s > maxstep ? s : maxstep;
+                ok &= !sd[i];
+                if (!up && sr[i] >= full)
+                    up = t + i + 1u;
+                if (t >= 2048u && !down && sr[i] == 0)
+                    down = t + i + 1u - 2048u;
+                prev = last = sr[i];
+            }
+            perf_block(sd, sr, CTL);                    /* (the stage, for pf.busy) */
+        }
+        k = (uint32_t)full * THR_SLOPE / 32768u + 2u;
+        snprintf(what, sizeof what, "  the glide: full (%d) after %u samples, 0 again %u after the release, steps <= %d (bound %u)",
+                 full, up, down, maxstep, k);
+        bad += check(what, ok && up >= 500u && up <= 520u && down && down <= 520u && (uint32_t)maxstep <= k && !last &&
+                           !pf.thr && !pf.busy && !perf_begin(CTL) && !tk->p[P_REV] && !tk->p[P_DLY]);
+    }
+    for (v = 0; v < 2u; v++) {   /* let go as the track falls silent: the bus rings out (REV / DLY 0: without the
+                                  * throw nothing at all); ROOM SIZE 110, the delay 1/8D FDBK 60 */
+        static int32_t b1[CTL], sd[CTL], sr[CTL], z[CTL], wb[CTL];
+        uint32_t rel = FS - FS % CTL, e = v ? PF_ETHR : PF_RTHR, run;
+        double e0 = 0, e1 = 0, e2 = 0, ref = 0;
+        track_t *tk = &trk[0];
+        for (run = 0; run < 2u; run++) {
+            host_tracks_init();
+            perf_reset();
+            dly_clear();
+            song.g[G_RSIZE] = 110;
+            song.g[G_DTIME] = 10;
+            tk->p[P_REV] = tk->p[P_DLY] = 0;
+            for (t = 0; t < 3u * FS; t += CTL) {
+                if (run && t == FS / 2u - (FS / 2u) % CTL)
+                    perf_press(e, 1);
+                if (run && t == rel)
+                    perf_press(e, 0);
+                for (i = 0; i < CTL; i++)
+                    b1[i] = t < rel ? (int32_t)lrint(60000.0 * sin(2 * M_PI * 220.0 * (t + i) / FS)) : 0;
+                perf_begin(CTL);
+                memset(sd, 0, sizeof sd);
+                memset(sr, 0, sizeof sr);
+                if (pf.thr)
+                    perf_throw(tk, b1, sd, sr, CTL);
+                fx_buses(z, sd, sr, wb, CTL);
+                perf_block(z, z, CTL);
+                for (i = 0; i < CTL; i++) {
+                    double a = fabs((double)wb[i]);
+                    if (!run)
+                        ref += a;
+                    else if (t + i >= rel - FS / 4u && t + i < rel)
+                        e0 += a;
+                    else if (t + i >= rel + FS / 10u && t + i < rel + FS / 2u)
+                        e1 += a;
+                    else if (t + i >= rel + 13u * FS / 10u && t + i < rel + 17u * FS / 10u)
+                        e2 += a;
+                }
+            }
+        }
+        e0 /= 0.25 * FS;
+        e1 /= 0.4 * FS;
+        e2 /= 0.4 * FS;
+        snprintf(what, sizeof what, "%s let go: the %s rings out (|wet| %.0f held, %.0f 0.1 .. 0.5 s after, %.1f 1.3 .. 1.7 s; without: %.0f)",
+                 v ? "ECHO THROW" : "REV THROW", v ? "delay" : "reverb", e0, e1, e2, ref);
+        bad += check(what, ref == 0.0 && e0 > 500.0 && e1 > e0 / 20.0 && e2 < e1 / 8.0 && !pf.thr && !pf.busy);
+    }
+    {   /* assignable: the key map's codes 14, 15; never saved: the track's and the song's values untouched */
+        uint8_t m[16];
+        memset(m, 0, sizeof m);
+        perf_map_put(m, 0, PF_RTHR);
+        perf_map_put(m, 1, PF_ETHR);
+        ok = (m[0] & 31u) == 14u && ((m[0] >> 5 | m[1] << 3) & 31u) == 15u && perf_map_of(m, 0) == PF_RTHR &&
+             perf_map_of(m, 1) == PF_ETHR && PF_NFX == 14 && PF_DEF[12] == PF_RTHR && PF_DEF[13] == PF_ETHR;
+        m[0] = (uint8_t)((m[0] & ~31u) | 16u);         /* code 16: a later firmware's effect -> the key's default */
+        ok &= perf_map_of(m, 0) == PF_DEF[0];
+        perf_map_put(m, 12, PF_RTHR);                   /* D5's default: code 0 */
+        ok &= perf_map_of(m, 12) == PF_RTHR && !(m[7] & 0xF0u) && !(m[8] & 1u);
+        bad += check("assignable: REV / ECHO THROW are codes 14 / 15 on any key, D5 / E5 by default; older codes as before", ok);
+    }
     return bad;
 }
 
@@ -1053,6 +1400,9 @@ static double cost_run(int on)
     } else if (on == 5 || on == 6) {                /* REPEAT 1/16 and FLANGER (5) / PHASER (6) */
         perf_press(PF_R16, 1);
         perf_press(on == 5 ? PF_FLG : PF_PHS, 1);
+    } else if (on == 7) {                           /* REV THROW and ECHO THROW together (1.5.1) */
+        perf_press(PF_RTHR, 1);
+        perf_press(PF_ETHR, 1);
     }
     i0 = instr_now();
     for (f = 0; f < 2u * FS; f += CTL)
@@ -1066,7 +1416,7 @@ static double cost_run(int on)
 static int test_cost(void)
 {
     double idle = cost_run(0), on = cost_run(1), harm = cost_run(2), rep = cost_run(3), plain = cost_run(4);
-    double flg = cost_run(5), phs = cost_run(6);
+    double flg = cost_run(5), phs = cost_run(6), thr = cost_run(7);
     char what[200];
     int bad;
     if (!idle) {
@@ -1083,7 +1433,10 @@ static int test_cost(void)
     bad += check(what, (harm - rep) * 0.017 <= 2.2);
     snprintf(what, sizeof what, "  FLANGER over REPEAT 1/16: +%.0f, PHASER +%.0f (device ~%.1f / %.1f %%, at most 2.5 %% each)",
              flg - rep, phs - rep, (flg - rep) * 0.017, (phs - rep) * 0.017);
-    return bad + check(what, (flg - rep) * 0.017 <= 2.5 && (phs - rep) * 0.017 <= 2.5);
+    bad += check(what, (flg - rep) * 0.017 <= 2.5 && (phs - rep) * 0.017 <= 2.5);
+    snprintf(what, sizeof what, "  REV THROW + ECHO THROW over idle: +%.0f, over REPEAT 1/16 +%.0f (device ~%.1f %%, at most 2 %%)",
+             thr - idle, thr - rep, (thr - rep) * 0.017);
+    return bad + check(what, (thr - rep) * 0.017 <= 2.0);
 }
 
 /* ------------------------------------------------------------ demos --- */
@@ -1197,6 +1550,54 @@ static void mod_demos(const char *dir)
     }
 }
 
+/* 1.5.1's throws on the song (120 BPM, every track's REV / DLY 0, so all of it is the throw's): the loop dry; ECHO
+ * THROW at TIME 1/8D held the 2nd bar's second half; REV THROW (HALL) likewise; each 4 bars, the song stopping after
+ * the 3rd so the tail is heard */
+static uint32_t td_e;
+static void throw_at(uint32_t t)
+{
+    uint32_t bar = 4u * FS * 60u / 120u;
+    if (td_e < PF_N && t == ((3u * bar / 2u + CTL - 1u) / CTL) * CTL)
+        perf_press(td_e, 1);
+    if (td_e < PF_N && t == ((2u * bar + CTL - 1u) / CTL) * CTL)
+        perf_press(td_e, 0);
+    if (t == ((3u * bar + CTL - 1u) / CTL) * CTL)
+        transport_req = 2;
+}
+static void throw_demos(const char *dir)
+{
+    static const char *const NAME[3] = {"loop_dry", "echo_throw_1-8D", "rev_throw"};
+    char path[512];
+    FILE *f, *tour;
+    uint32_t t, m, k, frames = 4u * 4u * FS * 60u / 120u;
+    snprintf(path, sizeof path, "%s/throw_tour.wav", dir);   /* the three one after the other */
+    if (!(tour = fopen(path, "wb")))
+        return;
+    wav_hdr(tour, 3u * frames);
+    for (m = 0; m < 3u; m++) {
+        song_setup();
+        for (k = 0; k < NTRK; k++)
+            trk[k].p[P_REV] = trk[k].p[P_DLY] = trk[k].p[P_CHOR] = 0;
+        song.g[G_DTIME] = 10;                           /* 1/8D */
+        song.g[G_RTYPE] = 2;                            /* HALL, the default */
+        td_e = m == 0u ? PF_N : m == 1u ? PF_ETHR : PF_RTHR;
+        song_render(frames, throw_at);
+        snprintf(path, sizeof path, "%s/%s.wav", dir, NAME[m]);
+        if (!(f = fopen(path, "wb")))
+            return;
+        wav_hdr(f, frames);
+        for (t = 0; t < frames; t++) {
+            wav_put(f, song_l[t], song_r[t]);
+            wav_put(tour, song_l[t], song_r[t]);
+        }
+        fclose(f);
+        printf("perform: demo %s (%s)\n", path, m == 0u ? "the loop dry, no sends" : m == 1u ?
+               "ECHO THROW at 1/8D held 1.5 .. 2 bars, the song stops after 3" : "REV THROW held 1.5 .. 2 bars, the song stops after 3");
+    }
+    fclose(tour);
+    printf("perform: demo %s/throw_tour.wav (the three in a row)\n", dir);
+}
+
 int main(int argc, char **argv)
 {
     int bad = 0;
@@ -1210,6 +1611,7 @@ int main(int argc, char **argv)
     bad += test_harm();
     bad += test_mod();
     bad += test_map();
+    bad += test_throw();
     bad += test_cost();
     if (argc > 1)
         demos(argv[1]);
@@ -1217,6 +1619,8 @@ int main(int argc, char **argv)
         harm_demos(argv[2]);
         mod_demos(argv[2]);
     }
+    if (argc > 3)
+        throw_demos(argv[3]);
     printf("%s\n", bad ? "PERFORM TEST FAILED" : "perform test passed");
     return bad != 0;
 }

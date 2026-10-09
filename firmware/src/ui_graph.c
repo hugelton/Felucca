@@ -233,6 +233,8 @@ static void graph_roll(const track_t *t, uint16_t c)
             cv_rect(x + 6, PR_Y0, 1, ybot - PR_Y0, T_ACCENT);
         if ((locks >> si) & 1u)                       /* a parameter lock: a mark under the step */
             cv_rect(x + 3, ybot + 3, 7, 2, T_ACCENT);
+        if (step_detailed(&seq_steps(t)[si]))         /* 1.5.1: CHANCE / RATCH / NUDGE set: a mark over it (DETAIL) */
+            cv_rect(x + 4, 2, 5, 3, c);
     }
     for (i = 0; i < ncol; i++) {                      /* the notes */
         uint32_t si = base + i, s = pr_src(t, si, len), nx = (si + 1u) % len;
@@ -264,9 +266,12 @@ static void graph_grid(const track_t *t, uint16_t c)
     uint32_t l, i, len = (uint32_t)t->p[P_SLEN], base = ui.bank * 16u, mute = drum_mute[trk_index(t) % NPART];
     uint64_t locks = motion_lock_steps(trk_index(t));
     int32_t y0 = 6;
-    for (i = 0; i < 16u && base + i < len; i++)     /* a parameter lock: a mark over the step */
-        if ((locks >> (base + i)) & 1u)
+    for (i = 0; i < 16u && base + i < len; i++) {   /* a parameter lock: a mark over the step; CHANCE / RATCH / */
+        if ((locks >> (base + i)) & 1u)               /* NUDGE set (1.5.1, DETAIL): a dot under it */
             cv_rect(41 + (int32_t)i * 12, 1, 8, 2, T_ACCENT);
+        if (step_detailed(&seq_steps(t)[base + i]))
+            cv_rect(43 + (int32_t)i * 12, 3, 4, 2, c);
+    }
     for (l = 0; l < NLANE; l++) {
         int32_t y = y0 + 4 + (int32_t)l * 14;
         int sel = l == ui.lane, mu = (mute >> l) & 1u;
@@ -297,6 +302,65 @@ static void graph_grid(const track_t *t, uint16_t c)
     }
     if (song.playing && t->seq_idx < len && t->seq_idx / 16u == ui.bank)
         cv_rect(40 + (int32_t)(t->seq_idx % 16u) * 12, y0 - 1, 10, 3, T_TEXT);
+}
+/* SEQ > DETAIL (1.5.1, Discussion #199): the cursor's 16 steps as four lanes, the knobs' order top to bottom, each
+ * named on the left (the lane of the knob just turned in the accent): CHANCE a bar as high as the chance, RATCH the
+ * step's bar in its 2..4 parts (as the roll draws a ratchet), NUDGE a tick left / right of the step's middle, VEL a bar
+ * as high as the velocity (an ACC step's full, TEXT). Off its default a value is bright (THEME, the cursor's ACCENT),
+ * at it faint (RAISE: 100 %, x1, 0, a VEL never set); DIM where it does not play (a NUDGE with QUANTIZE ON or on a
+ * ratchet, a VEL under ACC). A step that plays nothing: a dot (a value left on it DIM); past LEN nothing. The cursor
+ * framed through the lanes, the step playing a line */
+#define SD_X0 36                                    /* the first step column (12 px each) */
+static void graph_detail(const track_t *t, uint16_t c)
+{
+    static const char *const NAME[4] = {"CHN", "RAT", "NDG", "VEL"};
+    static const uint8_t LY[4] = {4, 38, 62, 86}, LH[4] = {28, 18, 18, 28};
+    uint32_t i, l, len = (uint32_t)t->p[P_SLEN], base = ui.bank * 16u, ncol;
+    ncol = base < len ? (len - base < 16u ? len - base : 16u) : 0u;
+    for (l = 0; l < 4u; l++) {
+        int32_t yb = LY[l] + LH[l];
+        cv_rect(SD_X0, yb, (int32_t)ncol * 12 + 1, 1, T_GRID);   /* the lane's floor */
+        cv_text_on(8, LY[l] + LH[l] / 2 - 8, &AF_S, NAME[l], ui.hot_t && ui.hot_col == l ? T_ACCENT : T_MID, T_SURF);
+    }
+    for (i = 0; i < ncol; i++) {
+        uint32_t si = base + i;
+        const step_t *st = &seq_steps(t)[si];
+        int32_t x = SD_X0 + (int32_t)i * 12;
+        uint16_t hi = si == ui.cursor ? T_ACCENT : c;
+        if (si == ui.cursor)
+            cv_frame(x, 1, 13, 116, T_TEXT);
+        if (song.playing && si == t->seq_idx)
+            cv_rect(x + 6, 2, 1, 114, T_ACCENT);
+        for (l = 0; l < 4u; l++) {
+            uint32_t k = SD_KIND[l];
+            int32_t v = ev_sval(st, k), y = LY[l], h = LH[l], set = v != ev_sdefv(k), bh;
+            uint16_t col;
+            if (!sd_takes(st, k) && !set) {           /* nothing plays there */
+                cv_rect(x + 5, y + h - 3, 2, 2, T_DIM);
+                continue;
+            }
+            col = !sd_takes(st, k) ? T_DIM : set ? hi : T_RAISE;
+            if (k == EVK_CHANCE) {
+                bh = v * h / 100;
+                cv_rect(x + 2, y + h - (bh < 2 ? 2 : bh), 9, bh < 2 ? 2 : bh, col);
+            } else if (k == EVK_RATCH) {
+                pr_split(x + 2, y + 5, 9, 8, col, (uint32_t)v);
+            } else if (k == EVK_NUDGE) {
+                if (set && (t->p[P_SQNT] || !ev_nudge_plays(t, st)))
+                    col = T_DIM;
+                cv_rect(x + 6, y + 2, 1, h - 4, T_GRID);
+                if (!set)
+                    cv_rect(x + 5, y + h / 2 - 1, 3, 3, col);
+                else
+                    cv_rect(x + 5 + v * 5 / 8, y + 3, 3, h - 6, col);
+            } else if (st->flags & SF_ACCENT) {       /* VEL: an ACC step plays 127 */
+                cv_rect(x + 2, y, 9, h, sd_takes(st, k) ? T_TEXT : T_DIM);
+            } else {
+                bh = v * h / 127;
+                cv_rect(x + 2, y + h - (bh < 2 ? 2 : bh), 9, bh < 2 ? 2 : bh, col);
+            }
+        }
+    }
 }
 /* SCL: the 12 keys as rounded bars (black keys high, white keys low): in the scale THEME, the root the
  * accent, out of the scale RAISE */
@@ -469,6 +533,7 @@ static uint32_t steps_hash(const track_t *t)
         h = (h ^ (st->note[0] + st->n * 128u + st->time * 1024u + st->flags * 4096u + st->note[1] * 65536u)) *
             16777619u;
         h = (h ^ (st->hit | (uint32_t)st->acc << 8 | (uint32_t)st->note[2] << 16 | (uint32_t)st->note[3] << 24)) * 16777619u;
+        h = (h ^ (st->vel | (uint32_t)st->probability << 8)) * 16777619u;   /* (1.5.1: DETAIL, the marks) */
     }
     return h;
 }
@@ -1082,14 +1147,14 @@ static void page_title(char *ti)
             if (i == ui.page)
                 k = n;
         }
-    str_cpy(ti, pt ? pt : grid_on() ? "GRID" : pg->title, 12);
+    str_cpy(ti, pt ? pt : grid_on() && !detail_on() ? "GRID" : pg->title, 12);
     if (n > 1) {
         str_cpy(ti + str_len(ti), " ", 4);
         fmt_int(ti + str_len(ti), (int32_t)k);
         str_cpy(ti + str_len(ti), "/", 4);
         fmt_int(ti + str_len(ti), (int32_t)n);
     }
-    if (pg->graph == GR_ROLL && !drum_track(t)) {  /* the piano roll: its tinted rows' scale ("C MIN") */
+    if (pg->graph == GR_ROLL && !drum_track(t) && !detail_on()) {   /* the piano roll: its tinted rows' scale ("C MIN") */
         str_cpy(ti, N_NOTE[(uint32_t)t->p[P_ROOT] % 12u], 4);
         str_cpy(ti + str_len(ti), " ", 4);
         str_cpy(ti + str_len(ti), N_SCALE[clamp(t->p[P_SCALE], 0, (int32_t)(sizeof N_SCALE / sizeof N_SCALE[0]) - 1)], 8);
@@ -1176,7 +1241,9 @@ static uint32_t graph_signature(void)
             uint64_t lk = motion_lock_steps(trk_index(t));
             h = (h ^ (uint32_t)lk ^ (uint32_t)(lk >> 32) * 2654435761u) * 16777619u;
         }
-        if (!drum_track(t)) {                        /* the roll: its view and the keys held */
+        if (detail_on())                             /* DETAIL: QUANTIZE (NUDGE's DIM), the lane named in the accent */
+            h = (h ^ (0xD1u + (uint32_t)t->p[P_SQNT] * 31u + (ui.hot_t ? ui.hot_col + 1u : 0u) * 977u)) * 2654435761u;
+        else if (!drum_track(t)) {                   /* the roll: its view and the keys held */
             pr_follow(t);
             h = (h ^ (proll.lo + 1u)) * 16777619u;
             h = (h ^ pr_held()) * 16777619u;
@@ -2195,7 +2262,9 @@ static void draw_graph(void)
             break;
         case GR_ROLL:
             cv_oy = 0;
-            if (drum_track(t))
+            if (detail_on())                          /* 1.5.1 (#199) */
+                graph_detail(t, c);
+            else if (drum_track(t))
                 graph_grid(t, c);
             else
                 graph_roll(t, c);
