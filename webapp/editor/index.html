@@ -6210,6 +6210,40 @@ function samplesScreen(root, ui) {
   }
   const $msg = (s) => ui.progress && ui.progress(s);
 
+  /* PIANO HD (1.4: the built-in PIANO is lo-fi now): the 1.0 .. 1.1.5 piano as a user slot, from the files beside the
+     page (samples/, pinned here), written as they are (never through the WAV import: it would re-encode them); then
+     the selected track's SET (GRAIN: SRC) may take that slot */
+  const PIANO_HD = { hdr: ["samples/PIANO_HD.hdr", 480, "8c6fdbd42451dcc800c5bb279b0ec377ce0037ef82346e880b26c9a537a3943b"],
+    data: ["samples/PIANO_HD.bin", 41345, "b7bccd33344686cb5abe692bb2d85a34d0d9f27452e7e3e658d9d962d8b8d765"] };
+  async function pinnedFile([url, size, sha]) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+    const b = new Uint8Array(await r.arrayBuffer());
+    const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    if (b.length !== size || hex !== sha) throw new Error(`${url}: not the expected file`);
+    return b;
+  }
+  async function pianoHd(k) {
+    const u = dev.smp.slots[k];
+    if (!(await ui.confirm(u.zones ? `PIANO HD → USR${k + 1} (${t("overwrite")} ${u.name || "—"})?` : `PIANO HD → USR${k + 1}?`))) return;
+    let files;
+    try { files = { hdr: await pinnedFile(PIANO_HD.hdr), data: await pinnedFile(PIANO_HD.data) }; } catch (e) { ui.say(e.message, "warn"); return; }
+    busy = true; drawAll();
+    const bar = boxes[k] && boxes[k].querySelector(".wprog i");
+    let ok = false;
+    try {
+      ok = await dev.smpWrite(k, files, (n, total) => { if (bar) bar.style.width = (n / total * 100).toFixed(1) + "%"; $msg(`USR${k + 1} ${kib(n)} / ${kib(total)} KiB`); });
+    } finally { busy = false; drawAll(); }
+    if (!ok) return;
+    ui.say(`USR${k + 1} PIANO HD`);
+    /* the selected track plays SAMPLE or GRAIN: its SET / SRC to that slot, if asked */
+    const pe0 = dev.info.pe0, id = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => pe0 + i).find((i) => dev.pdesc[i] && ["SET", "SRC"].includes(dev.pdesc[i].label)
+      && (dev.pdesc[i].names || []).includes(`USR${k + 1}`));
+    if (id == null || !["SAMPLE", "GRAIN"].includes(dev.engineName())) return;
+    const d = dev.pdesc[id], v = d.min + d.names.indexOf(`USR${k + 1}`);
+    if (dev.dump.p[id] !== v && (await ui.confirm(`${t("track")} ${(dev.sel ?? 0) + 1}: ${d.label} → USR${k + 1}?`))) dev.setParam(0, id, v);
+  }
+
   /* ---- a slot ---- */
   function slot(k) {
     const u = dev.smp.slots[k], d = drafts[k], on = rec && rec.k === k;
@@ -6249,6 +6283,7 @@ function samplesScreen(root, ui) {
       el("div", { class: "slothead" },
         el("b", { text: u.zones ? u.name || "—" : t("empty") }),
         el("span", { class: "lbl", text: u.zones ? `${u.zones} ZONES · ${u.kib} KiB` : "" }),
+        dev.info.motionCap ? el("button", { type: "button", class: "btn sm", disabled: busy || recActive(), onclick: () => pianoHd(k) }, ic("symbol_download"), "PIANO HD") : null,
         el("button", { type: "button", class: "btn sm", disabled: busy || !u.zones, onclick: async () => { if (await ui.confirm(`ERASE USR${k + 1}?`)) { busy = true; drawAll(); try { await dev.smpErase(k); } finally { busy = false; drawAll(); } } } }, ic("symbol_trash"), t("erase"))),
       el("div", { class: "meter", role: "img", "aria-label": `${u.kib} / ${dev.smp.slotKiB} KiB` }, el("i", { style: `width:${(u.kib / dev.smp.slotKiB * 100).toFixed(1)}%` })),
       el("div", { class: "draft" },
