@@ -400,4 +400,6 @@ static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint3
         midi_control(ch, d1, d2);
     } else if (st == 0xD0u)
         mod_midi(midi_track(ch), st, d1, d2);
+    else if (st == 0xC0u)
+        midi_pc(midi_track(ch), d1);
 }

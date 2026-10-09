@@ -137,6 +137,22 @@ static void host_preset(track_t *t, uint32_t e, uint32_t pi)
     eng_mem_claim(t);                             /* (voice.c engine_block would at the next block) */
 }
 
+#ifndef HOST_HAS_REAL_UI
+void midi_pc(track_t *t, uint32_t prog)
+{
+    if (!t)
+        return;
+    if (t->eng_req == ENGI_DRUM) {
+        t->p[P_E0] = (int16_t)(prog % DK_COUNT);
+    } else if (t->eng_req == ENGI_FM6) {
+        t->p[P_E7] = (int16_t)(prog % FM6_NFACTORY);
+        fm6_track_loaded(t);
+    } else {
+        host_preset_req(t, t->eng_req, prog);
+    }
+}
+#endif
+
 /* A saved SAMPLE PERC sound, as 1.0.2 and earlier stored it (SET 4, the GM kit; retired since: every load
  * turns it into DRUM, core.h drum_from_perc). Put straight into a track it plays SET 4's alias (PIANO): only
  * for the migration tests, which pass it through a load */

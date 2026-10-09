@@ -43,6 +43,7 @@
 #include <stdint.h>
 static uint32_t host_slots[3u * 0x14000u / 4u];          /* USR1..3 (zero: empty), as the flash at 0xA0000 */
 #define SMP_USER_XIP(k) ((const uint8_t *)host_slots + (k) * SMP_USER_SIZE)
+#define HOST_HAS_REAL_UI 1
 #define main hostsim_main
 #include "hostsim.c"
 #undef main

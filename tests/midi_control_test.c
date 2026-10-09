@@ -578,9 +578,60 @@ static int learn_test(void)
     memset(favorites.factory[14], 0, 32);
     return bad;
 }
+static int pc_test(void)
+{
+    int bad = 0;
+    midi_test_reset();
+
+    /* 1. Track 1 (ch 1) synth preset */
+    set_engine_of(&trk[0], 0);                        /* ANALOG */
+    queued(0xC0, 3, 0, 1);
+    bad += check("PC on ch 1 sets track 1 preset", trk[0].preset == 3);
+
+    /* 2. Track 2 (ch 2) synth preset */
+    set_engine_of(&trk[1], 2);                        /* PHASE */
+    queued(0xC1, 1, 0, 1);
+    bad += check("PC on ch 2 sets track 2 preset", trk[1].preset == 1);
+
+    /* 3. DRUM engine selects drum kit (P_E0) */
+    set_engine_of(&trk[3], ENGI_DRUM);
+    trk[3].p[P_E0] = 0;
+    queued(0xC3, 5, 0, 1);
+    bad += check("PC on drum engine track sets drum kit", trk[3].p[P_E0] == 5);
+
+    /* Drum kit wrapping at DK_COUNT */
+    queued(0xC3, DK_COUNT + 2, 0, 1);
+    bad += check("PC on drum engine wraps at DK_COUNT", trk[3].p[P_E0] == 2);
+
+    /* 4. FM6 engine factory patch selection (P_E7) */
+    set_engine_of(&trk[1], ENGI_FM6);
+    queued(0xC1, 6, 0, 1);
+    bad += check("PC on FM6 track sets factory patch slot", trk[1].p[P_E7] == 6);
+
+    queued(0xC1, FM6_NFACTORY + 3, 0, 1);
+    bad += check("PC on FM6 track wraps at FM6_NFACTORY", trk[1].p[P_E7] == 3);
+
+    /* 5. ROUT CH1-4: channels 5..16 ignored */
+    uint8_t pre_p = trk[0].preset;
+    queued(0xC4, 0, 0, 1);                            /* Ch 5 */
+    queued(0xC9, 0, 0, 1);                            /* Ch 10 */
+    bad += check("ROUT CH1-4: channels 5..16 PC ignored", trk[0].preset == pre_p);
+
+    /* 6. ROUT SEL: unassigned / any channel routes to selected track */
+    song.g[G_ROUTE] = 1;
+    song.sel = 0;                                     /* Track 1 selected */
+    set_engine_of(&trk[0], 0);                        /* ANALOG */
+    queued(0xC9, 2, 0, 1);                            /* Ch 10 -> TSEL */
+    bad += check("ROUT SEL: PC on ch 10 reaches selected track", trk[0].preset == 2);
+    song.g[G_ROUTE] = 0;
+    song.sel = 0;
+    events_block(CTL);
+
+    return bad;
+}
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + cc_map_test() + learn_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + cc_map_test() + learn_test() + pc_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }
