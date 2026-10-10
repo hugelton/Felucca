@@ -11,7 +11,7 @@
 // Then the cost: 1 s of a heavy song (FM6, PHYS, GRAIN chords, DRUM) against real time (BENCH_MAX, default 0.5:
 // fails above half of real time on this machine).
 import fs from "fs";
-import { storeSectors, restoreSectors } from "./worklet.js";
+import { storeSectors, restoreSectors, midiKnob, KNOB_CC, MASTER_CC } from "./worklet.js";
 
 const wasmPath = process.argv[2] || "build/emu/felucca.wasm", nativePath = process.argv[3];
 const bytes = fs.readFileSync(wasmPath);
@@ -136,6 +136,33 @@ const c = await device(null);
 c.render(600);
 check("a fresh instance with the kept sectors has it; one without does not",
       b.ex.web_test_user_preset(0) === 1 && c.ex.web_test_user_preset(0) === 0);
+
+// ---- the panel's knobs from a MIDI controller: the page turns them by midiKnob (worklet.js), as a drag does
+{
+  const last = [], cc = KNOB_CC + EN.PRESETS;
+  const r = [midiKnob(last, cc, 40), midiKnob(last, cc, 43), midiKnob(last, cc, 41), midiKnob(last, MASTER_CC, 127),
+             midiKnob(last, 74, 10), midiKnob(last, 28, 10)];
+  check("CC 22 (PRESETS): its first value takes its place, then +3, -2; CC 27 MASTER; CC 74, 28 the firmware's",
+        r[0].role === EN.PRESETS && r[0].n === 0 && r[1].n === 3 && r[2].n === -2 && r[3].master === 1023 &&
+        r[4] === null && r[5] === null);
+  const m = await device(null), t = await device(null), u = await device(null), knob = [];   // u: left alone
+  m.render(1200);
+  t.render(1200);
+  u.render(1200);
+  for (const v of [64, 65, 66, 67]) {                          // a controller's knob 64 -> 67: three detents
+    const k = midiKnob(knob, cc, v);
+    if (k.n) m.ex.web_enc(k.role, k.n);
+    m.render(40);
+  }
+  t.render(40);
+  t.turn(EN.PRESETS, 3);
+  m.render(300);
+  t.render(300);
+  u.render(460);
+  const ms = m.screen(), ts = t.screen(), us = u.screen();
+  check("CC 22 64 -> 67 turns PRESETS as three detents of the panel's knob do",
+        ms.some((v, i) => v !== us[i]) && ms.every((v, i) => v === ts[i]));
+}
 
 // ---- deterministic: the same gestures, the same samples
 async function song() {

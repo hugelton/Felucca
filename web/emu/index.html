@@ -97,6 +97,7 @@ footer small { font-size: 11px; opacity: .8; }
 </main>
 
 <script type="module">
+import { midiKnob } from "./worklet.js";
 const NS = "http://www.w3.org/2000/svg";
 // panel.c's labels (bit = label) and encoder roles
 const B = { FX: 0, SCL: 1, ENV: 2, LFO: 3, EDIT: 4, GLO: 5, HOME: 6, SAVE: 7, ARP: 8, SEQ: 9, PLAY: 10, REC: 11, "OCT-": 12, "OCT+": 13 };
@@ -278,13 +279,15 @@ function release(e) {
 for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) device.addEventListener(t, release);
 
 function drawKnob(k) { if (k.ind) k.ind.setAttribute("transform", `rotate(${angle[k.name]} ${k.x} ${k.y})`); }
+function setMaster(v) {
+  masterValue = Math.max(0, Math.min(1023, v));
+  angle.MASTER = -135 + 270 * masterValue / 1023;
+  send({ type: "master", value: masterValue });
+}
 function turn(k, n) {
   if (!n) return;
-  if (k.role === "master") {
-    masterValue = Math.max(0, Math.min(1023, masterValue + n * 16));
-    angle.MASTER = -135 + 270 * masterValue / 1023;
-    send({ type: "master", value: masterValue });
-  } else {
+  if (k.role === "master") setMaster(masterValue + n * 16);
+  else {
     angle[k.name] = (angle[k.name] + n * 18) % 360;            // 20 detents a turn
     send({ type: "enc", role: k.role, n });
   }
@@ -424,6 +427,8 @@ function saveFlash(sectors) {
 }
 
 // ------------------------------------------------------------------ Web MIDI in (channel messages)
+// CC 20..27 turn the panel's knobs (worklet.js midiKnob), any channel; the rest goes to the firmware
+const knobCC = [];
 async function midiOn() {
   if (!navigator.requestMIDIAccess) return;
   try {
@@ -432,7 +437,11 @@ async function midiOn() {
       for (const input of access.inputs.values()) {
         input.onmidimessage = (e) => {
           const d = e.data;
-          if (d.length >= 2 && d[0] >= 0x80 && d[0] < 0xF0) send({ type: "midi", data: [d[0], d[1], d[2] || 0] });
+          if (d.length < 2 || d[0] < 0x80 || d[0] >= 0xF0) return;
+          const k = (d[0] & 0xF0) === 0xB0 ? midiKnob(knobCC, d[1], d[2] || 0) : null;
+          if (!k) send({ type: "midi", data: [d[0], d[1], d[2] || 0] });
+          else if (k.master !== undefined) { setMaster(k.master); drawKnob(knobs.find((x) => x.role === "master")); }
+          else turn(knobs.find((x) => x.role === k.role), k.n);
         };
       }
     };
