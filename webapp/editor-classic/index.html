@@ -1682,7 +1682,7 @@ function makeMockDevice(opt = {}) {
   ];
   const GP = [
     D("BPM", F.BPM, 40, 240, 120), D("SWG", F.PCT, 0, 100, 0), E("CLK", ["INT", "USB", "TRS"], 0), D("TUNE", F.INT, -50, 50, 0),
-    E("TIME", NDIV, 1), D("FDBK", F.PCT, 0, 120, 60), D("COLR", F.PCT, 0, 127, 70), D("MIX", F.PCT, 0, 127, 90),
+    E("TIME", [...NDIV, "1/8D", "1/16D", "1/4D"], 1), D("FDBK", F.PCT, 0, 120, 60), D("COLR", F.PCT, 0, 127, 70), D("MIX", F.PCT, 0, 127, 90),
     D("SIZE", F.PCT, 0, 127, 90), D("DAMP", F.PCT, 0, 127, 60), D("CRT", F.LFOHZ, 0, 127, 40), D("CDP", F.PCT, 0, 127, 60),
     E("MIDI", ["USB", "TRS"], 0), E("SYNC", NDASH, 0), E("ROUT", ["CH1-4", "SEL", "CH5-8", "CH9-12", "CH13-16"], 0), D("CPU", F.INT, 0, 0, 0),
     D("SLOT", F.INT, 1, 4, 1), E("NAME", NDASH, 0), E("LOAD", NGO, 0), E("SAVE", NGO, 0),
@@ -2407,11 +2407,11 @@ function aliasOf(names, i) {
   return k >= 0 ? k : i;
 }
 
-/* #48: note divisions (1/4, 8T, 2BAR, ...) are listed by length, longest first, as the device's knobs step them
-   (src/params.c enum_order); the values stay. Any other list: in value order. -> d's values in the order shown */
+/* #48: note divisions (1/4, 8T, 2BAR, 1.5.1's dotted 1/8D ...) are listed by length, longest first, as the device's
+   knobs step them (src/params.c enum_order); the values stay. Any other list: in value order. -> d's values in the order shown */
 function divLength(n) {
-  const m = /^(\d+)\/(\d+)$/.exec(n) || /^(\d+)(T|BAR)$/.exec(n);
-  return !m ? null : m[2] === "BAR" ? +m[1] : m[2] === "T" ? 2 / 3 / +m[1] : +m[1] / +m[2];
+  const m = /^(\d+)\/(\d+)(D?)$/.exec(n) || /^(\d+)(T|BAR)$/.exec(n);
+  return !m ? null : m[2] === "BAR" ? +m[1] : m[2] === "T" ? 2 / 3 / +m[1] : (m[3] ? 1.5 : 1) * +m[1] / +m[2];
 }
 function enumShown(d) {
   const vals = [];
