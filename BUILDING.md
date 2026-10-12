@@ -106,6 +106,23 @@ DIGITAL conversion), the chord keys, the modulation matrix, the FX layer, the re
 and swing. With `DAISYSP` pointing at a DaisySP checkout, the PHYS models are also compared with
 their floating-point originals; without it that test is skipped.
 
+NRPN input and its [public address map](docs/midi-nrpn.md) have focused checks:
+
+```sh
+python3 tests/nrpn_registry_test.py
+cc -O1 -w -Ibuild/gen -Ifirmware/src -o build/host/midi_control_test tests/midi_control_test.c -lm
+build/host/midi_control_test
+```
+
+Run these after the build as well. The registry test freezes the published wire
+addresses and checks the documentation; the MIDI integration exercises USB/TRS
+parsers, channel selectors, routing, reset and existing CC/LEARN/RPN behavior.
+The full runner also runs ANALOG and MIDI integration with strict ASan/UBSan,
+without exclusions and with recovery disabled, when sanitizers are available.
+Other sanitizer runs retain the existing exclusions for signed integer overflow,
+shifts, bounds, object size and pointer overflow. Host and WASM checks do not
+replace the real FM-1 testing requested in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 The regression suite (`tests/regress.c`) renders every engine and preset and compares a
 hash of each render with `tests/golden.txt`; it also checks levels, voices and the CPU
 cost (`tests/cpu_baseline.txt`, `tests/target_budget.txt`). After an intended change of
