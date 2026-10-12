@@ -200,6 +200,7 @@ fail=0
 run() { echo "== $1"; shift; "$@" || fail=1; }
 
 $CC -o "$OUT/storage_test" tests/storage_test.c
+run "NRPN: stable wire addresses and reserved gaps" python3 tests/nrpn_registry_test.py
 
 $CC -Ibuild/gen -Ifirmware/src -o "$OUT/analog_ubsan_test" tests/analog_ubsan_test.c -lm
 run "ANALOG: signed samples, PWM shapes, all waves/taps and frozen baseline audio" "$OUT/analog_ubsan_test"
@@ -447,9 +448,9 @@ else
     A="$OUT/asan"
     SCC="${CC%% *} $SAN -Ibuild/gen -Ifirmware/src"
     export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
-    # ANALOG scaling: no UBSan exclusions, fail on UB.
+    # ANALOG scaling and the real MIDI integration: no UBSan exclusions, fail on UB.
     STRICT_CC="${CC%% *} -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -w -Ibuild/gen -Ifirmware/src"
-    for t in analog_ubsan_test; do
+    for t in analog_ubsan_test midi_control_test; do
         $STRICT_CC -o "$A/${t}_strict" "tests/$t.c" -lm
         run "Strict ASan/UBSan (no exclusions): $t" "$A/${t}_strict"
     done
@@ -457,7 +458,7 @@ else
     run "ASan/UBSan: update loader (other app -> this build)" "$A/ldr_test" "$OUT/old.fwsc" build/felucca.fwsc
     $SCC -DOWN_PKG=1 -o "$A/ota_test" tests/ota_test.c
     run "ASan/UBSan: M-UPGRADE entry (own loader)" "$A/ota_test" build/felucca.fwsc
-    for t in editor_test project_test backup_test robust_test fun10_test fm6bank_test; do
+    for t in editor_test project_test backup_test robust_test fun10_test fm6bank_test midi_control_test; do
         $SCC -o "$A/$t" tests/$t.c -lm
         run "ASan/UBSan: $t" "$A/$t"
     done

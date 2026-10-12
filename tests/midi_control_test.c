@@ -7,7 +7,7 @@
 static void midi_test_reset(void)
 {
     ui_power_on();
-    memset(midi_ch, 0, sizeof midi_ch); memset(midi_notes, 0, sizeof midi_notes);
+    memset(midi_ch, 0, sizeof midi_ch); midi_nrpn_reset(); memset(midi_notes, 0, sizeof midi_notes);
     memset(midi_owners, 0, sizeof midi_owners); memset(midi_bend_q8, 0, sizeof midi_bend_q8);
     memset(midi_bend_target, 0, sizeof midi_bend_target); memset(&midi_clock, 0, sizeof midi_clock);
     memset(&um, 0, sizeof um); memset(midi_in_source, 0, sizeof midi_in_source);
@@ -979,9 +979,272 @@ static int pc_test(void)
     bad += check("  MIDI LEARN waiting: a PC is not taken for a CC, it loads", ok);
     return bad;
 }
+/* NRPN v1 integration: real input queues and UART, alongside existing CC tests. */
+static void nrpn_select(uint32_t ch, uint32_t msb, uint32_t lsb, uint32_t source)
+{
+    queued(0xB0u | ch, 99, msb, source); queued(0xB0u | ch, 98, lsb, source);
+}
+static int nrpn_expected(uint32_t engine, uint32_t id, uint32_t value)
+{
+    const param_desc_t *d = param_desc_of(engine, id);
+    return d->min + ((int32_t)value * (d->max - d->min) + 63) / 127;
+}
+static int nrpn_selection_test(void)
+{
+    int bad = 0, ok; midi_test_reset(); trk[0].p[P_LEVEL] = 57;
+    queued(0xB0, 6, 0, 1); queued(0xB0, 99, 0, 1); queued(0xB0, 6, 0, 1);
+    bad += check("NRPN: power-on / MSB only cannot write", trk[0].p[P_LEVEL] == 57);
+    queued(0xB0, 98, 0, 2); queued(0xB0, 6, 0, 1); queued(0xB0, 6, 0, 2);
+    bad += check("NRPN: USB MSB plus TRS LSB never completes a selector", trk[0].p[P_LEVEL] == 57);
+    queued(0xB0, 98, 0, 1); queued(0xB0, 6, 0, 1);
+    ok = trk[0].p[P_LEVEL] == 0;
+    queued(0xB0, 6, 64, 1); ok &= trk[0].p[P_LEVEL] == 64;
+    queued(0xB0, 98, 39, 1); queued(0xB0, 6, 0, 1); ok &= trk[0].p[P_PAN] == -64;
+    queued(0xB0, 6, 64, 1); ok &= trk[0].p[P_PAN] == 0;
+    queued(0xB0, 6, 127, 1); ok &= trk[0].p[P_PAN] == 63;
+    bad += check("NRPN: zero address/value, repeated data, reused MSB and pan anchors", ok);
+    queued(0xB0, 99, 0, 2); queued(0xB0, 6, 17, 2);
+    ok = trk[0].p[P_LEVEL] == 17 && trk[0].p[P_PAN] == 63;
+    queued(0xB0, 6, 64, 1); ok &= trk[0].p[P_PAN] == 0 && trk[0].p[P_LEVEL] == 17;
+    bad += check("NRPN: reversed component order and simultaneous source selectors", ok);
+    midi_event_source(0xB0, 0, 99, 0, 0); midi_event_source(0xB0, 0, 98, 0, 3);
+    midi_event_source(0xB0, 0, 6, 90, 0); midi_event_source(0xB0, 0, 6, 90, 99);
+    bad += check("NRPN: unknown sources neither index selectors nor write parameters", trk[0].p[P_LEVEL] == 17 && trk[0].p[P_PAN] == 0);
+    nrpn_select(0, 127, 127, 1); queued(0xB0, 6, 127, 1);
+    ok = trk[0].p[P_PAN] == 0 && !midi_nrpn[0][0].seen;
+    nrpn_select(0, 2, 0, 2); queued(0xB0, 6, 127, 2); ok &= trk[0].p[P_LEVEL] == 17;
+    bad += check("NRPN: Null and unknown replace known selections without stale writes", ok);
+    return bad;
+}
+static int nrpn_map_scale_test(void)
+{
+    int bad = 0, ok = 1; uint32_t count = 0;
+    bad += check("NRPN: frozen API anchors independent of enum offsets",
+        midi_nrpn_id(0,0)==P_LEVEL && midi_nrpn_id(0,39)==P_PAN && midi_nrpn_id(0,96)==P_ITYPE &&
+        midi_nrpn_id(0,102)==P_ESYNC && midi_nrpn_id(1,0)==P_E0 && midi_nrpn_id(1,4)==P_E4 && midi_nrpn_id(1,7)==P_E7);
+    for (uint32_t page = 0; page < 128; page++) for (uint32_t lsb = 0; lsb < 128; lsb++) {
+        uint32_t id = midi_nrpn_id(page, lsb);
+        int valid = (page==0 && lsb<=102 && lsb!=8 && (lsb<61 || lsb>80)) || (page==1 && lsb<8);
+        ok &= (id<P_COUNT)==valid; count += id<P_COUNT;
+    }
+    bad += check("NRPN: exactly 82 common plus 8 engine addresses; every retired/unknown hole ignored", ok && count==90);
+    for (uint32_t lsb=0; lsb<128; lsb++) {
+        uint32_t id=midi_nrpn_id(0,lsb); if (id>=P_COUNT) continue;
+        midi_test_reset(); nrpn_select(0,0,lsb,1);
+        for (uint32_t v=0; v<3; v++) {
+            uint32_t value = v==0 ? 0 : v==1 ? 64 : 127;
+            int expected=nrpn_expected(0,id,value);
+            queued(0xB0,6,value,1); ok &= trk[0].p[id]==expected;
+        }
+    }
+    bad += check("NRPN: every common destination scales 0/64/127 through its descriptor", ok);
+    ok=1;
+    for (uint32_t ch=0; ch<2; ch++) for (uint32_t lsb=0; lsb<8; lsb++) {
+        midi_test_reset(); nrpn_select(ch,1,lsb,1);
+        for (uint32_t v=0; v<3; v++) {
+            uint32_t value=v==0?0:v==1?64:127;
+            int expected=nrpn_expected(eng_idx(trk[ch].eng_req),P_E0+lsb,value);
+            queued(0xB0|ch,6,value,1); ok &= trk[ch].p[P_E0+lsb]==expected;
+        }
+    }
+    bad += check("NRPN: ANALOG and FM6 E1-E8 use the current engine's descriptor", ok);
+    midi_test_reset(); nrpn_select(1,1,2,1); queued(0xB1,6,64,1);
+    bad += check("NRPN: FM6 MLVL midpoint is exactly zero", trk[1].p[P_E2]==0);
+    /* Exercise reserved addresses through dispatch, not merely the resolver. */
+    midi_test_reset(); int16_t before[P_COUNT]; memcpy(before,trk[0].p,sizeof before); ok=1;
+    for (uint32_t page=0; page<128; page++) for (uint32_t lsb=0; lsb<128; lsb++) {
+        if (midi_nrpn_id(page,lsb)<P_COUNT) continue;
+        nrpn_select(0,page,lsb,1); queued(0xB0,6,63,1);
+        ok &= !memcmp(before,trk[0].p,sizeof before);
+    }
+    bad += check("NRPN: all 16294 unregistered addresses produce no parameter write", ok);
+    return bad;
+}
+static int nrpn_routing_reset_test(void)
+{
+    int bad=0,ok=1; static const uint8_t routes[]={0,2,3,4};
+    for (uint32_t b=0;b<4;b++) for (uint32_t src=1;src<=2;src++) {
+        midi_test_reset(); song.g[G_ROUTE]=routes[b]; song.sel=3; events_block(CTL);
+        for (uint32_t k=0;k<4;k++) { nrpn_select(4*b+k,0,0,src); queued(0xB0|(4*b+k),6,25+k,src); }
+        for (uint32_t k=0;k<4;k++) ok &= trk[k].p[P_LEVEL]==25+(int)k;
+        uint32_t outside=(4*b+4)%16; nrpn_select(outside,0,0,src); queued(0xB0|outside,6,99,src);
+        ok &= !midi_nrpn[src-1][outside].seen;
+        for (uint32_t k=0;k<4;k++) ok &= trk[k].p[P_LEVEL]==25+(int)k;
+    }
+    bad += check("NRPN: USB/TRS four tracks in all channel blocks; outside bytes wholly discarded",ok);
+    midi_test_reset(); song.g[G_ROUTE]=1; events_block(CTL); nrpn_select(9,0,0,1); song.sel=2;
+    queued(0xB9,6,21,1); bad += check("NRPN: SEL resolves track at Data Entry, not selector time",trk[2].p[P_LEVEL]==21 && trk[0].p[P_LEVEL]!=21);
+    midi_test_reset(); nrpn_select(0,0,0,1); nrpn_select(0,0,39,2); nrpn_select(1,0,0,1);
+    queued(0xB0,121,0,2); queued(0xB0,6,7,1); queued(0xB0,6,7,2); queued(0xB1,6,23,1);
+    bad += check("NRPN: CC121 clears both sources only on its channel",!midi_nrpn[0][0].seen && !midi_nrpn[1][0].seen && trk[0].p[P_LEVEL]!=7 && trk[1].p[P_LEVEL]==23);
+    nrpn_select(0,0,0,1); song.g[G_ROUTE]=1; events_block(CTL); queued(0xB0,6,9,1);
+    ok=!midi_nrpn[0][0].seen && trk[0].p[P_LEVEL]!=9;
+    nrpn_select(0,0,0,1); song.g[G_ROUTE]=0; events_block(CTL); queued(0xB0,6,9,1);
+    ok &= !midi_nrpn[0][0].seen && trk[0].p[P_LEVEL]!=9;
+    bad += check("NRPN: route changes toward and away from SEL invalidate every selector",ok);
+    nrpn_select(0,0,0,1); nrpn_select(1,0,0,2);
+    for (uint32_t i=0;i<=MQ;i++) midi_enqueue(0x09u|0x90u<<8|60u<<16|100u<<24,1);
+    events_block(CTL); queued(0xB0,6,11,1); queued(0xB1,6,11,2);
+    bad += check("NRPN: stream overflow clears selectors and discards stale data",!midi_nrpn[0][0].seen && !midi_nrpn[1][1].seen && trk[0].p[P_LEVEL]!=11 && trk[1].p[P_LEVEL]!=11);
+    midi_test_reset(); nrpn_select(0,0,0,1); nrpn_select(0,0,39,2);
+    queued(0x90,60,100,1); queued(0xB0,123,0,1); queued(0xB0,120,0,2);
+    queued(0xB0,6,13,1); queued(0xB0,6,64,2);
+    bad += check("NRPN: CC120/123 release notes without cancelling selection",trk[0].p[P_LEVEL]==13 && trk[0].p[P_PAN]==0 && !midi_owners[0]);
+    nrpn_select(0,0,0,1); ui_power_on(); queued(0xB0,6,3,1);
+    bad += check("NRPN: simulated power-on clears selectors",!midi_nrpn[0][0].seen && trk[0].p[P_LEVEL]!=3);
+    /* Real UART parser with running status and interleaved realtime. */
+    midi_test_reset(); um_byte(0xB1); um_byte(98); um_byte(0); um_byte(99); um_byte(0xF8); um_byte(0); um_byte(6); um_byte(42); events_block(CTL);
+    bad += check("NRPN: real TRS parser keeps running status across realtime",trk[1].p[P_LEVEL]==42 && midi_nrpn[1][1].seen==3);
+    return bad;
+}
+static int nrpn_compat_motion_test(void)
+{
+    int bad=0,ok; midi_test_reset(); nrpn_select(0,0,39,1); nrpn_select(0,0,0,2);
+    queued(0xB0,101,0,2); queued(0xB0,100,0,1); queued(0xB0,6,127,1); queued(0xB0,38,127,2);
+    ok=midi_ch[0].semis==24 && midi_ch[0].cents==99 && !midi_nrpn[0][0].seen && !midi_nrpn[1][0].seen;
+    nrpn_select(0,0,39,1); queued(0xB0,6,0,1); queued(0xB0,38,0,1); ok &= trk[0].p[P_PAN]==-64 && midi_ch[0].cents==99;
+    queued(0xB0,101,3,1); queued(0xB0,6,7,2); ok &= trk[0].p[P_PAN]==-64 && midi_ch[0].semis==24;
+    queued(0xB0,101,127,1); queued(0xB0,100,127,2); queued(0xB0,6,9,1); ok &= trk[0].p[P_PAN]==-64;
+    bad += check("NRPN: RPN cancels both sources; RPN0 clamp/cents, unknown RPN and Null preserved",ok);
+    midi_test_reset(); nrpn_select(0,1,4,1); queued(0xB0,6,19,1); queued(0xB0,74,21,1);
+    ok=trk[0].p[P_E4]==21; queued(0xB0,6,23,1); ok &= trk[0].p[P_E4]==23;
+    ml_learn(74,1,P_LEVEL); queued(0xB0,74,25,1); ok &= trk[1].p[P_LEVEL]==25 && trk[0].p[P_E4]==23;
+    queued(0xB0,6,27,1); ok &= trk[0].p[P_E4]==27 && trk[1].p[P_LEVEL]==25;
+    for (uint32_t i=0;i<ML_N-1;i++) ml_learn(40+i,2,P_ATK+i);
+    uint8_t saved[32]; memcpy(saved,ml_tab,sizeof saved); ml_arm=1; ml_heard=0;
+    nrpn_select(0,1,4,1); queued(0xB0,6,29,1);
+    ok &= trk[0].p[P_E4]==29 && ml_count()==16 && ml_arm && !ml_heard && !memcmp(saved,ml_tab,sizeof saved);
+    ml_arm=0; bad += check("NRPN: last writer wins; learned CC retains priority; full/armed LEARN unaffected",ok);
+    midi_test_reset(); nrpn_select(0,1,4,1); queued(0xC0,1,0,1); frame(); queued(0xB0,6,31,1);
+    bad += check("NRPN: Program Change keeps selection and current-engine destination",midi_nrpn[0][0].seen==3 && trk[0].p[P_E4]==31);
+    trk[0].eng_req = ENGI_FM6; queued(0xB0,6,64,1);
+    bad += check("NRPN: existing E5 selection follows a newly requested FM6 engine",trk[0].p[P_E4]==0 && midi_nrpn[0][0].seen==3);
+    midi_test_reset(); song.rec=1; seq_start(); events_block(CTL); nrpn_select(0,1,4,1); queued(0xB0,6,20,1);
+    ok=motion.count==1 && motion.event[0].param==P_E4 && motion.event[0].value==20;
+    queued(0xB0,6,20,1); ok &= motion.count==1;
+    nrpn_select(1,1,2,1); queued(0xB1,6,127,1); ok &= motion.count==1;
+    seq_stop(); events_block(CTL); song.rec=0; queued(0xB0,6,77,1); ok &= trk[0].p[P_E4]==77 && motion.count==1;
+    bad += check("NRPN: motion matches CC, repeated values and other tracks do not record",ok);
+    return bad;
+}
+/* No events_block inside these ingress helpers: selectors and data really burst. */
+static int nrpn_usb_burst(const uint8_t msg[][3], uint32_t n)
+{
+    uint8_t packet[64];
+    if (n>16u) return 0;
+    for (uint32_t i=0;i<n;i++) {
+        packet[4*i]=msg[i][0]>>4; packet[4*i+1]=msg[i][0];
+        packet[4*i+2]=msg[i][1]; packet[4*i+3]=msg[i][2];
+    }
+    return ep1_take(packet,n*4u);
+}
+static void nrpn_trs_burst(const uint8_t *bytes, uint32_t n)
+{
+    for (uint32_t i=0;i<n;i++) um_byte(bytes[i]);
+}
+static int nrpn_burst_test(void)
+{
+    int bad=0,ok=1; midi_test_reset();
+    int16_t level=trk[0].p[P_LEVEL],pan=trk[0].p[P_PAN];
+    static const uint8_t usb_partial[][3]={{0xB0,99,0},{0xB0,6,0}};
+    static const uint8_t trs_partial[]={0xB0,98,0xF8,39,6,127};
+    ok &= nrpn_usb_burst(usb_partial,NELEM(usb_partial));
+    nrpn_trs_burst(trs_partial,sizeof trs_partial);
+    ok &= mi_w-mi_r==5u && trk[0].p[P_LEVEL]==level && trk[0].p[P_PAN]==pan;
+    events_block(CTL);
+    bad += check("NRPN burst: real USB MSB/TRS LSB plus data on same channel never combine",ok && trk[0].p[P_LEVEL]==level && trk[0].p[P_PAN]==pan);
+
+    static const uint8_t usb_complete[][3]={
+        {0xB0,98,0},{0xB0,6,19},{0xB0,7,21},{0xB0,6,23},
+        {0xB1,99,1},{0xB1,98,2},{0xB1,6,127},{0x90,60,100},{0xE0,127,127}};
+    static const uint8_t trs_complete[]={
+        0xB0,99,0,6,0,6,0xF8,127,
+        0xB1,99,0,98,39,6,0,
+        0xB2,99,0,98,0,6,37};
+    ok=nrpn_usb_burst(usb_complete,NELEM(usb_complete));
+    nrpn_trs_burst(trs_complete,sizeof trs_complete);
+    ok &= mi_w-mi_r==19u && trk[0].p[P_LEVEL]==level;
+    events_block(CTL);
+    ok &= trk[0].p[P_LEVEL]==23 && trk[0].p[P_PAN]==63 && trk[1].p[P_E2]==63 &&
+          trk[1].p[P_PAN]==-64 && trk[2].p[P_LEVEL]==37 && midi_bend_target[0]==512 &&
+          gate_note(&trk[0],60) && midi_owners[0]==1u && !midi_in_overflow && mi_r==mi_w;
+    bad += check("NRPN burst: same-channel independent USB/TRS destinations retain CC, bend and notes",ok);
+    static const uint8_t release[]={0x80,60,0};
+    nrpn_trs_burst(release,sizeof release); events_block(CTL);
+    bad += check("NRPN burst: subsequent TRS note-off releases USB note with no stale owner",!midi_owners[0] && !gate_note(&trk[0],60));
+
+    /* Both sources exercise every channel; alternate source order before one drain. */
+    ok=1;
+    for (uint32_t pass=0;pass<16;pass++) {
+        uint8_t usb_msgs[12][3],trs_bytes[28];
+        for (uint32_t ch=0;ch<4;ch++) {
+            uint8_t v=(uint8_t)((pass*17+ch*11)%128),p=(uint8_t)((pass*29+ch*7)%128);
+            usb_msgs[3*ch][0]=usb_msgs[3*ch+1][0]=usb_msgs[3*ch+2][0]=(uint8_t)(0xB0|ch);
+            usb_msgs[3*ch][1]=99; usb_msgs[3*ch][2]=0;
+            usb_msgs[3*ch+1][1]=98; usb_msgs[3*ch+1][2]=0;
+            usb_msgs[3*ch+2][1]=6; usb_msgs[3*ch+2][2]=v;
+            trs_bytes[7*ch]=(uint8_t)(0xB0|ch); trs_bytes[7*ch+1]=99; trs_bytes[7*ch+2]=0;
+            trs_bytes[7*ch+3]=98; trs_bytes[7*ch+4]=39; trs_bytes[7*ch+5]=6; trs_bytes[7*ch+6]=p;
+        }
+        if (pass&1u) nrpn_trs_burst(trs_bytes,sizeof trs_bytes);
+        ok &= nrpn_usb_burst(usb_msgs,NELEM(usb_msgs));
+        if (!(pass&1u)) nrpn_trs_burst(trs_bytes,sizeof trs_bytes);
+        ok &= mi_w-mi_r==24u;
+        events_block(CTL);
+        for (uint32_t ch=0;ch<4;ch++) {
+            ok &= trk[ch].p[P_LEVEL]==(int16_t)((pass*17+ch*11)%128) &&
+                  trk[ch].p[P_PAN]==nrpn_expected(eng_idx(trk[ch].eng_req),P_PAN,(pass*29+ch*7)%128);
+        }
+        ok &= !midi_in_overflow && mi_r==mi_w;
+    }
+    bad += check("NRPN burst: all four channels use both sources independently across 16 queued batches",ok);
+
+    /* Loss occurs after complete selectors and before the next Data Entry. */
+    um_byte(0x90);
+    for (uint32_t i=0;i<=MQ;i++) { um_byte(62); um_byte(100); }
+    ok=midi_in_overflow && um.drops>0;
+    events_block(CTL);
+    static const uint8_t usb_stale[][3]={{0xB0,6,3},{0xB0,98,0},{0xB0,6,4}};
+    static const uint8_t trs_stale[]={0xB0,6,127,98,39,6,0};
+    level=trk[0].p[P_LEVEL]; pan=trk[0].p[P_PAN];
+    ok &= nrpn_usb_burst(usb_stale,NELEM(usb_stale));
+    nrpn_trs_burst(trs_stale,sizeof trs_stale); events_block(CTL);
+    ok &= trk[0].p[P_LEVEL]==level && trk[0].p[P_PAN]==pan &&
+          midi_nrpn[0][0].seen==2u && midi_nrpn[1][0].seen==2u && !midi_owners[0];
+    static const uint8_t usb_recover[][3]={{0xB0,99,0},{0xB0,98,0},{0xB0,6,41}};
+    static const uint8_t trs_recover[]={0xB0,99,0,98,39,6,64};
+    ok &= nrpn_usb_burst(usb_recover,NELEM(usb_recover));
+    nrpn_trs_burst(trs_recover,sizeof trs_recover); events_block(CTL);
+    ok &= trk[0].p[P_LEVEL]==41 && trk[0].p[P_PAN]==0;
+    bad += check("NRPN burst: real TRS queue overflow between selection/data requires complete reselection",ok);
+
+    /* The UART DMA parser reports missing bytes separately from a queue overflow. */
+    uart_midi_take(UM_RING+1u); ok=midi_in_overflow; events_block(CTL);
+    ok &= nrpn_usb_burst(usb_stale,NELEM(usb_stale));
+    nrpn_trs_burst(trs_stale,sizeof trs_stale); events_block(CTL);
+    bad += check("NRPN burst: detected UART byte loss invalidates both source selectors",ok && trk[0].p[P_LEVEL]==41 && trk[0].p[P_PAN]==0);
+    return bad;
+}
+static int nrpn_stress_test(void)
+{
+    int bad=0,ok=1; int expected[4]={0}; midi_test_reset(); song.g[G_CLOCK]=1; events_block(CTL);
+    for (uint32_t i=0;i<10000;i++) {
+        uint32_t ch=i%4,source=1+i%2,value=(i*37)%128,note=60+ch;
+        nrpn_select(ch,0,39,source); queued(0xB0|ch,6,value,source); expected[ch]=nrpn_expected(eng_idx(trk[ch].eng_req),P_PAN,value);
+        queued(0x90|ch,note,100,source); queued(0xB0|ch,64,127,source); queued(0x80|ch,note,0,source);
+        queued(0xE0|ch,i%128,64,source); queued(0xB0|ch,7,90,source); queued(0xF8,0,0,1); queued(0xB0|ch,64,0,source);
+    }
+    for (uint32_t k=0;k<4;k++) ok &= trk[k].p[P_PAN]==expected[k] && !midi_owners[k] && !trk[k].nheld;
+    for (uint32_t k=0;k<4;k++) if (!drum_track(&trk[k]))
+        for (uint32_t v=0;v<NVOICE;v++) ok &= !trk[k].v[v].active || !trk[k].v[v].gate;
+    for (uint32_t ch=0;ch<16;ch++) for (uint32_t note=0;note<128;note++) ok &= !midi_notes[ch][note];
+    bad += check("NRPN: 10000 changes with notes/sustain/bend/clock/CC leave exact values and no owners",ok && !midi_in_overflow);
+    bad += check("NRPN: static selector RAM 96 bytes, below 256-byte budget",sizeof midi_nrpn==96 && sizeof MIDI_NRPN_COMMON_MAP==256);
+    return bad;
+}
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + learn_test() + pc_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + learn_test() + pc_test() + nrpn_selection_test() + nrpn_map_scale_test() + nrpn_routing_reset_test() + nrpn_compat_motion_test() + nrpn_burst_test() + nrpn_stress_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }

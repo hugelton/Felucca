@@ -13,6 +13,29 @@ typedef struct {
     uint8_t rpn_msb, rpn_lsb;
 } midi_channel_t;
 static midi_channel_t midi_ch[16];
+/* Selectors belong to a source/channel; sound parameters and RPN stay shared. */
+#include "midi_nrpn_map.h"
+typedef struct { uint8_t msb, lsb, seen; } midi_nrpn_t;
+static midi_nrpn_t midi_nrpn[2][16];
+#define NRPN_DEST(lsb, id, name) [lsb] = (id) + 1u,
+static const uint16_t MIDI_NRPN_COMMON_MAP[128] = { MIDI_NRPN_COMMON(NRPN_DEST) };
+#undef NRPN_DEST
+static void midi_nrpn_reset_channel(uint32_t ch)
+{
+    midi_nrpn[0][ch].seen = midi_nrpn[1][ch].seen = 0;
+}
+static void midi_nrpn_reset(void) { memset(midi_nrpn, 0, sizeof midi_nrpn); }
+static uint32_t midi_nrpn_id(uint32_t msb, uint32_t lsb)
+{
+    uint32_t id = P_COUNT;
+    if (lsb < 128u) {
+        if (msb == 0u && MIDI_NRPN_COMMON_MAP[lsb])
+            id = MIDI_NRPN_COMMON_MAP[lsb] - 1u;
+        else if (msb == 1u && lsb < 8u)
+            id = P_E0 + lsb;
+    }
+    return id < P_COUNT ? id : P_COUNT;
+}
 /* Low bits: track + 1. High bit: key released, held by its channel's pedal. */
 static uint8_t midi_sel_on[16][128];
 #define midi_notes midi_sel_on
@@ -302,10 +325,11 @@ static void __attribute__((noinline)) midi_cc_map(track_t *t, uint32_t cc, uint3
     midi_cc_set(t, id, value);
 }
 
-static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
+static void midi_control_source(uint32_t ch, uint32_t cc, uint32_t value, uint32_t source)
 {
     midi_channel_t *c = midi_channel(ch);
     uint32_t i, mask;
+    midi_nrpn_t *n = source == 1u || source == 2u ? &midi_nrpn[source - 1u][ch] : 0;
     switch (cc) {
     case 1:
         c->wheel = (uint8_t)value;
@@ -329,6 +353,7 @@ static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
             }
         break;
     case 121:                                      /* Reset All Controllers, keep bend sensitivity */
+        midi_nrpn_reset_channel(ch);
         c->bend = 0;
         c->wheel = 0;
         c->rpn_msb = c->rpn_lsb = 127;
@@ -341,10 +366,16 @@ static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
         else
             midi_pedal_up(ch);
         break;
-    case 101: c->rpn_msb = (uint8_t)value; break;
-    case 100: c->rpn_lsb = (uint8_t)value; break;
+    case 101: midi_nrpn_reset_channel(ch); c->rpn_msb = (uint8_t)value; break;
+    case 100: midi_nrpn_reset_channel(ch); c->rpn_lsb = (uint8_t)value; break;
     case 99: case 98:                              /* NRPN selection cancels RPN data entry */
         c->rpn_msb = c->rpn_lsb = 127;
+        if (n) {
+            if (cc == 99u) { n->msb = (uint8_t)value; n->seen |= 1u; }
+            else { n->lsb = (uint8_t)value; n->seen |= 2u; }
+            if (n->seen == 3u && n->msb == 127u && n->lsb == 127u)
+                n->seen = 0;
+        }
         break;
     case 6: case 38:
         if (!c->rpn_msb && !c->rpn_lsb) {           /* RPN 0: +/-0..24 semitones, 0..99 cents */
@@ -353,6 +384,10 @@ static void midi_control(uint32_t ch, uint32_t cc, uint32_t value)
             else
                 c->cents = (uint8_t)(value > 99u ? 99u : value);
             midi_expression_channel(ch);
+        } else if (cc == 6u && n && n->seen == 3u) {
+            uint32_t id = midi_nrpn_id(n->msb, n->lsb);
+            if (id < P_COUNT)
+                midi_cc_set(midi_track(ch), id, value);
         }
         break;
     default:
@@ -377,6 +412,7 @@ static void __attribute__((noinline)) midi_route_block(void)
         for (note = 0; note < 128u; note++)
             if (midi_notes[ch][note])
                 midi_release(ch, note);
+        midi_nrpn_reset_channel(ch);
         c->pedal = c->wheel = 0;
         c->bend = 0;
         c->rpn_msb = c->rpn_lsb = 127;
@@ -392,7 +428,7 @@ static volatile uint8_t *const mpc_io;
  * (realtime and clock are handled in events_block, SysEx never reaches here). With ROUT CH1-4 channels
  * 5..16 are ignored entirely (with CH5-8 .. CH13-16 every channel outside the block): notes, bend, CCs (CC1/11/64, RPN, and the CC120/121/123 panic and reset),
  * channel aftertouch, Program Change, so they stay free for other instruments. */
-static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint32_t d1, uint32_t d2)
+static void __attribute__((noinline)) midi_event_source(uint32_t st, uint32_t ch, uint32_t d1, uint32_t d2, uint32_t source)
 {
     if (song.g[G_ROUTE] != 1 && !midi_in_block(ch))
         return;
@@ -403,9 +439,15 @@ static void __attribute__((noinline)) midi_event(uint32_t st, uint32_t ch, uint3
         midi_expression_channel(ch);
     } else if (st == 0xB0u) {
         mod_midi(midi_track(ch), st, d1, d2);
-        midi_control(ch, d1, d2);
+        midi_control_source(ch, d1, d2, source);
     } else if (st == 0xD0u)
         mod_midi(midi_track(ch), st, d1, d2);
     else if (st == 0xC0u && mpc_io)                /* Program Change: the main loop loads it (ui.c midi_pc_poll) */
         mpc_io[trk_index(midi_track(ch))] = (uint8_t)(0x80u | d1);
+}
+
+/* Existing direct callers use USB; queued input always passes its real source. */
+static void midi_event(uint32_t st, uint32_t ch, uint32_t d1, uint32_t d2)
+{
+    midi_event_source(st, ch, d1, d2, 1u);
 }
