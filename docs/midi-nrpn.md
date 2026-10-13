@@ -40,6 +40,9 @@ MENU > MIDI > MIDI IN determines the destination exactly as it does for notes:
 CH1-4 maps channels 1..4 to tracks 1..4; CH5-8, CH9-12 and CH13-16 map their
 respective blocks. Other channels are ignored. SEL resolves the selected track
 when CC6 arrives, even if the selector was sent before the panel selection changed.
+TRACK (Felucca 1.6) uses each track's configured MIDI channel: the first explicit
+match wins; otherwise the first OMNI track accepts the channel. OFF accepts none.
+Changing a TRACK channel clears selectors, so send both components again.
 
 CC101 or CC100 cancels NRPN on both inputs of that channel and retains existing
 RPN behavior. Selecting NRPN cancels the shared channel RPN selection. RPN0
@@ -93,7 +96,7 @@ independent of enum ordering. Do not reindex published addresses. Reserved:
 | 0:24 | Arp Order | `P_AORDER` | 0…1 (enum) |
 | 0:25 | Scale Root | `P_ROOT` | 0…11 |
 | 0:26 | Scale | `P_SCALE` | 0…15 (enum) |
-| 0:27 | Quantize | `P_QUANT` | 0…3 (enum) |
+| 0:27 | Quantize | `P_QUANT` | 0…4 (enum, includes SEQ+T in 1.6) |
 | 0:28 | Transpose | `P_TRANS` | -24…24 |
 | 0:29 | Sequence Length | `P_SLEN` | 1…64 |
 | 0:30 | Sequence Division | `P_SDIV` | 0…9 (enum) |
@@ -116,16 +119,16 @@ independent of enum ordering. Do not reindex published addresses. Reserved:
 | 0:47 | Slicer Rate | `P_SLRATE` | 0…5 (enum) |
 | 0:48 | Slicer Depth | `P_SLDEPTH` | 0…127 |
 | 0:49 | Matrix1 Source | `P_M1SRC` | 0…10 (enum) |
-| 0:50 | Matrix1 Destination | `P_M1DST` | 0…20 (enum) |
+| 0:50 | Matrix1 Destination | `P_M1DST` | 0…22 (enum, adds VEL/TIME in 1.6) |
 | 0:51 | Matrix1 Amount | `P_M1AMT` | −64…63 |
 | 0:52 | Matrix2 Source | `P_M2SRC` | 0…10 (enum) |
-| 0:53 | Matrix2 Destination | `P_M2DST` | 0…20 (enum) |
+| 0:53 | Matrix2 Destination | `P_M2DST` | 0…22 (enum, adds VEL/TIME in 1.6) |
 | 0:54 | Matrix2 Amount | `P_M2AMT` | −64…63 |
 | 0:55 | Matrix3 Source | `P_M3SRC` | 0…10 (enum) |
-| 0:56 | Matrix3 Destination | `P_M3DST` | 0…20 (enum) |
+| 0:56 | Matrix3 Destination | `P_M3DST` | 0…22 (enum, adds VEL/TIME in 1.6) |
 | 0:57 | Matrix3 Amount | `P_M3AMT` | −64…63 |
 | 0:58 | Matrix4 Source | `P_M4SRC` | 0…10 (enum) |
-| 0:59 | Matrix4 Destination | `P_M4DST` | 0…20 (enum) |
+| 0:59 | Matrix4 Destination | `P_M4DST` | 0…22 (enum, adds VEL/TIME in 1.6) |
 | 0:60 | Matrix4 Amount | `P_M4AMT` | −64…63 |
 | 0:81 | Chord | `P_CHRD` | 0…9 (enum) |
 | 0:82 | Chord Voicing | `P_VOIC` | 0…4 (enum) |

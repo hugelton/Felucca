@@ -1225,6 +1225,36 @@ static int nrpn_burst_test(void)
     bad += check("NRPN burst: detected UART byte loss invalidates both source selectors",ok && trk[0].p[P_LEVEL]==41 && trk[0].p[P_PAN]==0);
     return bad;
 }
+/* NRPN follows 1.6's TRACK routing just like notes/CCs; remapping a channel
+ * invalidates selectors before data can reach a different track. */
+static int nrpn_track_routing_test(void)
+{
+    int bad=0,ok=1; uint32_t src;
+    midi_test_reset(); song.g[G_ROUTE]=ROUTE_TRACK; events_block(CTL);
+    tch(0,9); tch(1,1); tch(2,MCH_OMNI); tch(3,MCH_OFF);
+    int16_t off_level=trk[3].p[P_LEVEL];
+    for (src=1;src<=2;src++) {
+        nrpn_select(9,0,0,src); queued(0xB9,6,40+src,src);
+        nrpn_select(1,0,0,src); queued(0xB1,6,50+src,src);
+        nrpn_select(4,0,0,src); queued(0xB4,6,60+src,src);
+        ok &= trk[0].p[P_LEVEL]==40+(int)src && trk[1].p[P_LEVEL]==50+(int)src &&
+              trk[2].p[P_LEVEL]==60+(int)src && trk[3].p[P_LEVEL]==off_level;
+    }
+    bad += check("NRPN TRACK: USB/TRS explicit channels, OMNI fallback, OFF untouched",ok);
+    tch(1,9); int16_t second=trk[1].p[P_LEVEL];
+    nrpn_select(9,0,0,1); queued(0xB9,6,71,1);
+    bad += check("NRPN TRACK: duplicate channel chooses first track as notes do",trk[0].p[P_LEVEL]==71 && trk[1].p[P_LEVEL]==second);
+    nrpn_select(9,0,39,2); tch(0,10);
+    ok=!midi_nrpn[0][9].seen && !midi_nrpn[1][9].seen;
+    queued(0xBA,6,23,1); queued(0xBA,98,0,1); queued(0xBA,6,24,1);
+    ok &= trk[0].p[P_LEVEL]==71;
+    queued(0xBA,99,0,1); queued(0xBA,6,25,1);
+    bad += check("NRPN TRACK: channel remap clears both selectors, requires complete reselection",ok && trk[0].p[P_LEVEL]==25);
+    tch(2,MCH_OFF); second=trk[2].p[P_LEVEL];
+    nrpn_select(4,0,0,2); queued(0xB4,6,99,2);
+    bad += check("NRPN TRACK: unassigned channel with no OMNI is ignored",trk[2].p[P_LEVEL]==second && !midi_nrpn[1][4].seen);
+    return bad;
+}
 static int nrpn_stress_test(void)
 {
     int bad=0,ok=1; int expected[4]={0}; midi_test_reset(); song.g[G_CLOCK]=1; events_block(CTL);
@@ -1245,6 +1275,6 @@ static int nrpn_stress_test(void)
 int main(void)
 {
     int bad = controls_test() + sustain_test() + ownership_test() + clock_test(1) + clock_test(2) + clock_arp_and_boundaries() +
-              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + learn_test() + pc_test() + nrpn_selection_test() + nrpn_map_scale_test() + nrpn_routing_reset_test() + nrpn_compat_motion_test() + nrpn_burst_test() + nrpn_stress_test();
+              arp_ext_stop_test() + usb_burst_test() + route_test() + route_block_test() + route_track_test() + follow_test() + cc_map_test() + learn_test() + pc_test() + nrpn_selection_test() + nrpn_map_scale_test() + nrpn_routing_reset_test() + nrpn_compat_motion_test() + nrpn_burst_test() + nrpn_track_routing_test() + nrpn_stress_test();
     printf("%s\n", bad ? "MIDI CONTROL/CLOCK TEST FAILED" : "MIDI control/clock integration tests passed"); return bad != 0;
 }
