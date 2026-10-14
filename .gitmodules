@@ -1,0 +1,4 @@
+# Felucca-Engines (MIT): the ANALOG LOFI TRIO WHEEL NOISE engines, dsp.c, felucca_engine.h, their tables.
+[submodule "firmware/engines"]
+	path = firmware/engines
+	url = https://github.com/hugelton/Felucca-Engines.git

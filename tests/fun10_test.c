@@ -146,10 +146,10 @@ static int lfo(void)
         int32_t g[4];
         t->p[P_M1SRC] = MS_LFO; t->p[P_M1DST] = MD_AMP; t->p[P_M1AMT] = 63;
         t->lfo_fade = 32767;
-        t->p[P_LPOL] = 0; t->lfo_val = 0; mod_begin(t); g[0] = mod.gain; mod_end(t);
-        t->p[P_LPOL] = 1; t->lfo_val = 0; mod_begin(t); g[1] = mod.gain; mod_end(t);
-        t->lfo_val = 16384; mod_begin(t); g[2] = mod.gain; mod_end(t);
-        t->p[P_LPOL] = 0; t->lfo_val = -32768; mod_begin(t); g[3] = mod.gain; mod_end(t);
+        t->p[P_LPOL] = 0; t->lfo_val = 0; mod_begin(t); g[0] = MOD(t).gain; mod_end(t);
+        t->p[P_LPOL] = 1; t->lfo_val = 0; mod_begin(t); g[1] = MOD(t).gain; mod_end(t);
+        t->lfo_val = 16384; mod_begin(t); g[2] = MOD(t).gain; mod_end(t);
+        t->p[P_LPOL] = 0; t->lfo_val = -32768; mod_begin(t); g[3] = MOD(t).gain; mod_end(t);
         bad += check("  the matrix's LFO > AMP: UNI 0 = BI -1 (closed), UNI 0.5 = BI 0", g[1] == g[3] && abs(g[2] - g[0]) < 64 &&
                      g[1] < 1000);
         t->p[P_M1SRC] = t->p[P_M1DST] = t->p[P_M1AMT] = 0;

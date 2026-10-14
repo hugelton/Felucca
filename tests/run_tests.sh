@@ -13,6 +13,8 @@
 #                   (tests/target_budget.txt, +10 %; exact, static).
 #   voices          the budget of 8, steal fades, MONO / LEGATO / UNISON keep their note, the VOICE cap,
 #                   no hanging notes on any MIDI / key routing.
+# FELUCCA-ENGINES (engines/tests, MIT): ANALOG LOFI TRIO WHEEL NOISE on their own host against their golden renders,
+#                   once with their own tables and once with build/gen's (the two generators agree).
 # ENGINE MEMORY (tests/union_test.c, 1.5): engine switches on a part (every pair and A -> B -> A of the engines that
 #                   share the part's state region, with others), hashed against 1.4's (tests/union_golden.txt).
 # UI renders (tests/ui_render.c): every screen in every palette from the real drawing code: the layout lint (no text
@@ -165,7 +167,7 @@
 #                   Felucca's targets, the controls' directions, no clipping, DC, retriggers, the hat choke, the
 #                   kick on a small speaker; the DRUM engine (src/eng_drum.c): its key map, the 8 lanes together,
 #                   one hit per lane, the choke between lanes; the cost per voice; demos in build/drum_demo/.
-# NOISE (tests/noise_test.c): the engine (src/eng_noise.c): COLR's slope (white, pink, brown), the filter and the
+# NOISE (tests/noise_test.c): the engine (engines/src/eng_noise.c): COLR's slope (white, pink, brown), the filter and the
 #                   register clock following the key, META periodic at the key, no DC, no clipping at the
 #                   corners, a note from silence the same twice, the cost per voice; demos in build/noise_demo/.
 # DIGITAL -> FM6 (tests/fm4_test.c, built with FELUCCA_FM4=1): the retired four-operator engine against its conversion
@@ -309,15 +311,17 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "settings: PER1..PER4 migration, palette ids and preference preservation" "$OUT/settings_test"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/ui_test" tests/ui_test.c -lm
     run "UI: sounds keep steps, undo, recording, MIDI overflow, pending saves, panel recovery, drum grid, song chain, GREY gray, MONO neutral" "$OUT/ui_test"
+    $CC -w -DFELUCCA_CPU2=0 -Ibuild/gen -Ifirmware/src -o "$OUT/ui_test_c1" tests/ui_test.c -lm
+    run "UI, a FELUCCA_CPU2=0 build: MENU > SYSTEM without 2ND CORE, the rest as the default build" "$OUT/ui_test_c1"
     $CC -DPREEMPT -g -fwrapv -fsanitize=address,undefined -fno-sanitize=shift -fno-sanitize-recover=all -w \
         -Ibuild/gen -Ifirmware/src -o "$OUT/drumfuzz" tests/drumfuzz_test.c -lm
     run "DRUM grid stress (#211, ASan / UBSan): random grid editing, locks, undo, engines over a playing synth, the ISR anywhere" \
         "$OUT/drumfuzz" 1 6 1500
     run "DRUM grid stress (#211) with a SONG playing" "$OUT/drumfuzz" 101 3 1500 song
-    FV=$(sed -n 's/^#define FELUCCA_VERSION "\([^"]*\)".*/\1/p' firmware/src/felucca.c)   # (the splash, ABOUT: the real version)
+    FV=$(sed -n 's/^#define FELUCCA_VERSION "\([^"]*\)".*/\1/p' firmware/src/felucca.c | head -n 1)   # (the splash, ABOUT: the real version)
     $CC -O1 -w "-DFELUCCA_VERSION=\"$FV\"" -Ibuild/gen -Ifirmware/src -Itests -o "$OUT/ui_render" tests/ui_render.c -lm
     mkdir -p build/ui_new/ppm build/ui_slot
-    run "UI renders: layout lint (every screen and palette, every page, engine and column value), GREY gray, MONO neutral, alignment by ink (1 px fails), draw cost" \
+    run "UI renders: layout lint (every screen and palette, every page, engine and column value), GREY gray, MONO neutral, alignment by ink (1 px fails), draw cost, LARGE one value size per knob (#251)" \
         "$OUT/ui_render" build/ui_new build/ui_slot
     if python3 -c "import PIL" 2>/dev/null; then python3 tests/ui_render.py build/ui_new build/ui_slot; fi
     $CC -w -DFELUCCA_FM4=1 -Ibuild/gen -Ifirmware/src -o "$OUT/ui_test_fm4" tests/ui_test.c -lm
@@ -339,6 +343,8 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/editor_test" tests/editor_test.c -lm
     run "editor: real C protocol, malformed transfers, queue recovery, MENU settings (writes build/host/menu.json)" \
         env MENU_JSON="$OUT/menu.json" "$OUT/editor_test"
+    $CC -w -DFELUCCA_CPU2=0 -Ibuild/gen -Ifirmware/src -o "$OUT/editor_test_c1" tests/editor_test.c -lm
+    run "editor, a FELUCCA_CPU2=0 build: MENU settings without 2ND CORE (ids 0..31)" "$OUT/editor_test_c1"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/robust_test" tests/robust_test.c -lm
     run "robustness: crafted sample slots, engine numbers, retained old projects, preset patterns, malformed requests" \
         "$OUT/robust_test"
@@ -373,7 +379,30 @@ if [ -f build/gen/felucca_tables.h ]; then
     mkdir -p build/reverb_demo
     run "REVERB TYPE: ROOM / SPRING bit-identical, SPRING and HALL decay / stability / level, HALL silence / stereo / ringing, model changes, cost, demos" "$OUT/reverb_test" build/fx_demo build/reverb_demo
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/regress" tests/regress.c -lm
-    run "regression: golden renders, health, voices, CPU budget" "$OUT/regress" tests/golden.txt tests/cpu_baseline.txt
+    run "regression: golden renders, health, voices, CPU budget (2ND CORE OFF: one core)" "$OUT/regress" tests/golden.txt tests/cpu_baseline.txt
+    $CC -O2 -w -DFELUCCA_CPU2=0 -Ibuild/gen -Ifirmware/src -o "$OUT/regress_cpu2_0" tests/regress.c -lm
+    run "regression, a FELUCCA_CPU2=0 build (none of the second core): the same golden renders and CPU budget" \
+        "$OUT/regress_cpu2_0" tests/golden.txt tests/cpu_baseline.txt
+    # the second core (2ND CORE ON: fx.c mix_block, tests/c1_host.h): a thread renders the parts handed to it, bit for
+    # bit
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -DC1_HOST -pthread -o "$OUT/regress_c1" tests/regress.c -lm
+    run "second core: the golden renders with a thread taking every split of the parts in turn" \
+        "$OUT/regress_c1" tests/golden.txt tests/cpu_baseline.txt
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -pthread -o "$OUT/dualcore_test" tests/dualcore_test.c -lm
+    run "second core: 4 parts of every preset, mixes: bit for bit on one core and on two, every split" \
+        "$OUT/dualcore_test"
+    if [ -n "$TSAN" ]; then                     # TSAN=1: the same under ThreadSanitizer (~6 min): shared state
+        TSAN_CC="cc -O1 -g -w -Ibuild/gen -Ifirmware/src -fsanitize=thread -pthread"
+        $TSAN_CC -o "$OUT/dualcore_tsan" tests/dualcore_test.c -lm
+        run "second core under ThreadSanitizer: 4 parts of every preset, mixes" \
+            env TSAN_OPTIONS=halt_on_error=1 "$OUT/dualcore_tsan"
+    fi
+    # Felucca-Engines (firmware/engines, MIT): its own test, then its standalone host built with Felucca's generated
+    # tables against its golden renders (the same hashes: build/gen/felucca_tables.h has the engines' tables)
+    run "Felucca-Engines: its own tables, host and golden renders" sh firmware/engines/tests/run.sh
+    $CC -O2 -w '-DFE_TABLES_H="felucca_tables.h"' -Ibuild/gen -o "$OUT/fe_host" firmware/engines/tests/fe_host.c
+    "$OUT/fe_host" > "$OUT/fe_renders.txt" || fail=1
+    run "Felucca-Engines with Felucca's tables: the engines' golden renders" diff -u firmware/engines/tests/golden.txt "$OUT/fe_renders.txt"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/union_test" tests/union_test.c -lm
     run "engine memory (1.5): every switch between the engines with per-part state sounds as in 1.4 (720 sequences)" \
         "$OUT/union_test" tests/union_golden.txt

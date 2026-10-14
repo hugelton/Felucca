@@ -329,7 +329,7 @@ static void menu_row(uint32_t k, uint32_t row)
                   vy, &AF_M, row == MI_TUNE ? v : b, val, bg);
         return;
     }
-    if (menu_n(row) == 2u && (str_eq(v, "ON") || str_eq(v, "OFF"))) {
+    if (menu_n(row) == 2u && (str_eq(v, "ON") || str_eq(v, "OFF")) && !MI_TEXT(row)) {
         menu_switch(MR_VR, y, h, str_eq(v, "ON"), sel);
         return;
     }

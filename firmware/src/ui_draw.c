@@ -475,11 +475,83 @@ static void card_mot_of(const int16_t *vp)
     card_mot_next = (uint8_t)(id < P_COUNT && ((card_mot_mask[id / 32u] >> (id % 32u)) & 1u));
 }
 
+/* #251, MENU > LARGE: a tall card sets its value in one face over everything its knob can show (L where every value
+ * fits L, else M, else S), so turning it never changes the value's size. card_span (what the knob shows: fn's text
+ * of each value lo..hi) is set just before a draw_column (card_span_of / card_span_by) and taken by it; none: the
+ * value's own face. The face is worked out when what the card is of changes (span_face's key), not every frame. */
+typedef struct card_span {
+    void (*fn)(const struct card_span *sp, int32_t v, char *val);   /* value v as the card shows it (val: 16) */
+    const void *p;                                       /* fn's: a param_desc_t, a name list .. */
+    int32_t lo, hi, ctx;
+} card_span_t;
+static card_span_t card_span;
+static void span_param(const card_span_t *sp, int32_t v, char *val)
+{
+    const char *u;
+    uint8_t named = fmt_named;                           /* (param_format sets it: the card's own, kept) */
+    param_format((const param_desc_t *)sp->p, v, val, &u);
+    fmt_named = named;
+}
+static void span_names(const card_span_t *sp, int32_t v, char *val)
+{
+    str_cpy(val, ((const char *const *)sp->p)[v], 16);
+}
+static void span_mod_dst(const card_span_t *sp, int32_t v, char *val)   /* MOD's DST: the track's (its engine's) names */
+{
+    str_cpy(val, mod_dst_name((const track_t *)sp->p, v), 16);
+}
+static void span_fop(const card_span_t *sp, int32_t v, char *val)       /* FM6's operator pages: card ctx's byte = v */
+{
+    const char *l, *u;
+    int32_t r;
+    uint32_t ic;
+    (void)fop_card_at((uint32_t)sp->ctx, v, &l, val, &u, &r, &ic);
+}
+static void card_span_by(void (*fn)(const card_span_t *, int32_t, char *), const void *p, int32_t lo, int32_t hi, int32_t ctx)
+{
+    card_span.fn = fn;
+    card_span.p = p;
+    card_span.lo = lo;
+    card_span.hi = hi;
+    card_span.ctx = ctx;
+}
+static void card_span_of(const param_desc_t *d)          /* a parameter: its whole range */
+{
+    card_span_by(span_param, d, d->min, d->max, (int32_t)d->fmt);
+}
+/* the face of a tall card's value s (0 L, 1 M, 2 S): L where the sparse L face has its glyphs and it fits with 3 px
+ * either side, M where it fits with 2 (52 px: "THUMB"), else S (cut by cv_text_fit when even S is too wide) */
+static uint32_t tall_face(const char *s)
+{
+    return large_face_has(s) && ink_w(&AF_L, s) <= COL_W - 6 ? 0u : ink_w(&AF_M, s) <= COL_W - 4 ? 1u : 2u;
+}
+static uint32_t span_face(uint32_t c, const card_span_t *sp, const char *label)
+{
+    static uint32_t key[4], face[4] = {3u, 3u, 3u, 3u};   /* (3: none yet) */
+    uint32_t k = str_hash((uint32_t)(uintptr_t)sp->fn * 31u + (uint32_t)(uintptr_t)sp->p * 7u + (uint32_t)sp->lo * 131u +
+                          (uint32_t)sp->hi * 8191u + (uint32_t)sp->ctx * 524287u + song.sel + TSEL->eng_req * 4u, label);
+    int32_t v;
+    char t[16];
+    c &= 3u;
+    if (k == key[c] && face[c] <= 2u)
+        return face[c];
+    key[c] = k;
+    face[c] = 0;
+    for (v = sp->lo; v <= sp->hi && face[c] < 2u; v++) {   /* (a few hundred values at most, once) */
+        uint32_t f;
+        sp->fn(sp, v, t);
+        if ((f = tall_face(t)) > face[c])
+            face[c] = f;
+    }
+    return face[c];
+}
+
 /* MENU > LARGE, a tall card (ui.c LK_TALL; 57 x LG_CARD_H): which knob it is (a "K1" pill in M, the keycap's colours,
  * the accent while it turns, DIM when the knob does nothing here) and the icon at the right of it; the label in M
  * centred (S when M is too wide); the value centred in L, its figures twice the height of M (M, then S, when L is too
- * wide or the sparse L face lacks a glyph: gen_aa_font.py L_CHARS); the unit (S) centred under it; the gauge. The
- * value snaps (no rolling digits). MONO, the knob just turned: the label inverted as on the small cards. */
+ * wide or the sparse L face lacks a glyph: gen_aa_font.py L_CHARS; #251: for any value the knob shows, sp: one face
+ * for all of them, span_face); the unit (S) centred under it; the gauge. The value snaps (no rolling digits). MONO,
+ * the knob just turned: the label inverted as on the small cards. */
 #ifndef LARGE_HOOK
 #define LARGE_HOOK(s, why) ((void)0)                    /* host: a tall card's value and its face (0 L, 1 M: a glyph not
                                                          * in L, 2 M: L too wide, 3 S) */
@@ -491,7 +563,7 @@ static void card_mot_of(const int16_t *vp)
 #define LG_UY 73                                        /* the unit's line (S capitals rows 76..84) */
 #define LG_GY 92                                        /* the gauge, 3 px */
 static void draw_column_tall(uint32_t c, const char *label, const char *val, const char *unit, uint16_t vc, int32_t ratio,
-                             uint32_t icon, int hot, int mot, int32_t kid)
+                             uint32_t icon, int hot, int mot, int32_t kid, const card_span_t *sp)
 {
     uint16_t lc = hot ? T_ACCENT : mot ? T_THEME : T_MID;
     const aafont_t *lf = &AF_M, *vf = &AF_L;
@@ -537,11 +609,12 @@ static void draw_column_tall(uint32_t c, const char *label, const char *val, con
         cv_keycap(HALF_UP(COL_W - kc_w((uint32_t)kid)), LG_VB + HALF_UP(AF_L_CAP_H - KC_H), (uint32_t)kid,
                   vc == T_ACCENT || vc == T_DIM ? vc : T_KEY, T_INK, T_SURF);
     } else if (val[0]) {
-        int why = !large_face_has(val) ? 1 : ink_w(vf, val) > COL_W - 6 ? 2 : 0;
-        if (why)
-            vf = &AF_M;
-        if (vf == &AF_M && ink_w(vf, val) > COL_W - 6)
-            vf = &AF_S, why = 3;
+        uint32_t f = tall_face(val), fs = sp->fn ? span_face(c, sp, label) : 0u;
+        int why;
+        if (fs > f)
+            f = fs;                                     /* (the value's own where it needs a smaller one) */
+        vf = f == 0u ? &AF_L : f == 1u ? &AF_M : &AF_S;
+        why = f == 2u ? 3 : f == 1u ? (!large_face_has(val) ? 1 : 2) : 0;
         LARGE_HOOK(val, why);
         vy = vf == &AF_L ? LG_VB - AF_L_CAP_Y : vf == &AF_M ? LG_VB + HALF_UP(AF_L_CAP_H - AF_M_CAP_H) - AF_M_CAP_Y
                                                           : LG_VB + HALF_UP(AF_L_CAP_H - AF_S_CAP_H) - AF_S_CAP_Y;
@@ -584,6 +657,8 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
     const aafont_t *vf = &AF_M;
     uint32_t n, kn;
     int32_t kid = kc_tag(val, &kn);
+    card_span_t sp = card_span;                         /* (#251: what the knob shows, this card only) */
+    card_span.fn = 0;
     fmt_named = 0;                                      /* (params.c: a name, for this card only) */
     card_mot_next = 0;                                  /* (the same: MOTION, this card only) */
     card_mot = (uint8_t)((card_mot & ~(1u << c)) | (uint32_t)mot << c);
@@ -638,7 +713,7 @@ static void draw_column(uint32_t c, const char *label, const char *val, const ch
             ui.roll[c].from[0] = 0;
         str_cpy(ui.col[c], key, sizeof ui.col[c]);
         if (kind == LK_TALL) {
-            draw_column_tall(c, label, val, unit, vc, ratio, icon, hot, mot, kid);
+            draw_column_tall(c, label, val, unit, vc, ratio, icon, hot, mot, kid, &sp);
             return;
         }
         cv_begin(COL_W, COL_H, T_BG);
@@ -890,6 +965,7 @@ static void draw_columns(void)
             const param_desc_t *d = home_param(c, &vp);
             param_format(d, *vp, val, &unit);
             card_mot_of(vp);
+            card_span_of(d);
             if (home_levels())                         /* 1.5: T1..T4 LEVEL, the track's cushion, muted: DIM */
                 draw_column(c, "LEVEL", val, unit, trk[c].p[P_MUTE] ? T_DIM : VAL(c), RATIO(d, *vp), trk_icon(c, 1));
             else
@@ -1016,12 +1092,15 @@ static void draw_columns(void)
         uint32_t lvl = trk_level(song.sel);
         param_format(&TP[P_LEVEL], (int32_t)lvl, val, &unit);   /* (0: OFF) */
         card_mot_of(&TSEL->p[P_LEVEL]);
+        card_span_of(&TP[P_LEVEL]);
         draw_column(0, "LEVEL", val, unit, lvl && !t->p[P_MUTE] ? VAL(0u) : T_DIM, (int32_t)lvl * 1000 / 127, ICON_AUTO);
         param_format(&TP[P_PAN], t->p[P_PAN], val, &unit);
         card_mot_of(&TSEL->p[P_PAN]);
+        card_span_of(&TP[P_PAN]);
         draw_column(1, "PAN", val, unit, VAL(1u), RATIO(&TP[P_PAN], t->p[P_PAN]), param_icon(&TP[P_PAN], t->p[P_PAN]));
         param_format(&TP[P_REV], t->p[P_REV], val, &unit);
         card_mot_of(&TSEL->p[P_REV]);
+        card_span_of(&TP[P_REV]);
         draw_column(2, "REV", val, unit, VAL(2u), RATIO(&TP[P_REV], t->p[P_REV]), ICON_AUTO);
         draw_column(3, "MUTE", t->p[P_MUTE] ? "ON" : "OFF", "", t->p[P_MUTE] ? T_ACCENT : VAL(3u), -1, ICON_AUTO);
         return;
@@ -1089,6 +1168,8 @@ static void draw_columns(void)
                 continue;
             }
             on = fop_card(c, &lb, val, &u, &r, &ic);
+            if (fop_field(c) != FO_OP && fop_field(c) != FO_STG)   /* (OP, STAGE: 1..6, 1..4) */
+                card_span_by(span_fop, 0, 0, (int32_t)fm6_max(fop_byte(fop_field(c))), (int32_t)c);
             draw_column(c, lb, val, u, on ? VAL(c) : T_DIM, r, ic);
         }
         return;
@@ -1099,9 +1180,12 @@ static void draw_columns(void)
         int32_t s = t->p[id], d = t->p[id + 1u], a = t->p[id + 2u];
         fmt_int(val, (int32_t)mod_ui_slot + 1);
         draw_column(0, "SLOT", val, "/4", VAL(0u), (int32_t)mod_ui_slot * 1000 / 3, mod_src_icon(MS_OFF));   /* (the mod icon) */
+        card_span_by(span_names, N_MSRC, 0, MS_N - 1, 0);
         draw_column(1, "SRC", N_MSRC[clamp(s, 0, MS_N - 1)], "", s ? VAL(1u) : T_DIM, -1, mod_src_icon(s));
+        card_span_by(span_mod_dst, t, 0, MD_N - 1, 0);
         draw_column(2, "DST", mod_dst_name(t, d), "", d ? VAL(2u) : T_DIM, -1, mod_dst_icon(t, d));
         param_format(&TP[id + 2u], a, val, &unit);
+        card_span_of(&TP[id + 2u]);
         draw_column(3, "AMT", val, unit, a ? VAL(3u) : T_DIM, RATIO(&TP[id + 2u], a), mod_src_icon(MS_OFF));
         return;
     }
@@ -1230,6 +1314,7 @@ static void draw_columns(void)
         }
         param_format(d, *vp, val, &unit);
         card_mot_of(vp);                                /* (a global: never) */
+        card_span_of(d);
         if (vp == &TSEL->p[P_LRATE] && TSEL->p[P_LSYNC]) {   /* LFO 2 SYNC on: RATE does nothing, DIM (1.2) */
             draw_column(c, d->label, val, unit, T_DIM, RATIO(d, *vp), param_icon(d, *vp));
             continue;

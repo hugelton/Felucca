@@ -15,15 +15,23 @@
  * nothing of theirs is in the settings record (MI_PROJECT: menu_get / menu_put read and write song.g) */
 enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_SCROFF, MI_SCOPE, MI_HOME, MI_HOLD, MI_ACCEL, MI_LATCH, MI_BPMLOCK, MI_SCLLED,
        MI_PREVIEW, MI_CHADD, MI_SELECT, MI_LOWCUT, MI_USB,
-       MI_CLICK, MI_CLKLVL, MI_COUNTIN, MI_TUNE, MI_MIDIIN, MI_TCH1, MI_TCH2, MI_TCH3, MI_TCH4, MI_MFOLLOW, MI_SCRWAKE, MI_LCLEAR, MI_SERIAL, MI_RESTORE, MI_HELP, MI_PANEL, MI_INFO,
-       MI_ABOUT, MI_COUNT };
+       MI_CLICK, MI_CLKLVL, MI_COUNTIN, MI_TUNE, MI_MIDIIN, MI_TCH1, MI_TCH2, MI_TCH3, MI_TCH4, MI_MFOLLOW, MI_SCRWAKE, MI_LCLEAR, MI_SERIAL, MI_RESTORE, MI_HELP,
+#if FELUCCA_CPU2
+       MI_CPU2,                                        /* (not in a FELUCCA_CPU2=0 build: core.h) */
+#endif
+       MI_PANEL, MI_INFO, MI_ABOUT, MI_COUNT };
                                                        /* (1.1: the metronome's rows in AUDIO; 1.2: RESTORE LAST in
                                                         * SYSTEM, SCALE LEDS STEP PREVIEW CHORD ENTRY in CONTROL, SCOPE in
                                                         * DISPLAY, TUNE in AUDIO, MIDI IN in MIDI, INFO in SYSTEM;
                                                         * 1.3: HOME in DISPLAY; 1.5: HELP in SYSTEM; 1.5.5: SELECT
                                                         * in CONTROL, T1..T4 CHANNEL, AUTO SELECT and SCREEN WAKE
-                                                        * in MIDI) */
+                                                        * in MIDI; 1.6.1: 2ND CORE in SYSTEM) */
 #define MI_VALUES MI_PANEL
+#if FELUCCA_CPU2
+#define MI_TEXT(row) ((row) == MI_CPU2)                /* OFF / ON (BETA): its values as words, not a switch (ui_menu.c) */
+#else
+#define MI_TEXT(row) 0
+#endif
 static int menu_valued(uint32_t row) { return row < MI_VALUES && row != MI_LCLEAR; }   /* (a row with a value) */
 #define MI_PROJECT(row) ((row) == MI_TUNE || ((row) >= MI_MIDIIN && (row) <= MI_TCH4))   /* the project's values (song.g,
                                                                                          * song.mch), not settings */
@@ -32,7 +40,11 @@ static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM",
                                               "FX LATCH", "BPM LOCK", "SCALE LEDS", "STEP PREVIEW", "CHORD ENTRY", "SELECT",
                                               "SPEAKER EQ", "USB LEVEL", "CLICK", "CLICK LEVEL", "COUNT-IN", "TUNE",
                                               "MIDI IN", "T1 CHANNEL", "T2 CHANNEL", "T3 CHANNEL", "T4 CHANNEL",
-                                              "AUTO SELECT", "SCREEN WAKE", "LEARN CLEAR", "USB SERIAL", "RESTORE LAST", "HELP", "CALIBRATION", "INFO",
+                                              "AUTO SELECT", "SCREEN WAKE", "LEARN CLEAR", "USB SERIAL", "RESTORE LAST", "HELP",
+#if FELUCCA_CPU2
+                                              "2ND CORE",
+#endif
+                                              "CALIBRATION", "INFO",
                                               "ABOUT"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
@@ -61,6 +73,9 @@ static const uint8_t MI_TAB[MI_COUNT] = {
     MTAB_MIDI,                                                              /* SCREEN WAKE (1.5.5: DISPLAY is full) */
     MTAB_MIDI,                                                              /* LEARN CLEAR (1.5) */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* USB SERIAL, RESTORE LAST, HELP (1.5) */
+#if FELUCCA_CPU2
+    MTAB_SYSTEM,                                                            /* 2ND CORE (1.6.1) */
+#endif
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* CALIBRATION, INFO (1.2), ABOUT */
 };
 /* TUNE: the project's tuning in cents (G_TUNE, -50..+50); as a row its values 0..TUNE_N - 1 (value - TUNE_MIN). The
@@ -105,6 +120,9 @@ static const menu_flag_t MENU_FLAGS[] = {
     {MI_HELP, PREF_HELP, {"OFF", "ON"}},               /* 1.5, Discussion #156: ON, a hint per page / layer (ui_help.c) */
     {MI_MFOLLOW, PREF_MIDI_FOLLOW, {"OFF", "ON"}},     /* 1.5.5, #208: ON, MIDI IN notes select their track (ui_input.c) */
     {MI_SCRWAKE, PREF_WAKE_PANEL, {"+MIDI", "PANEL"}}, /* 1.5.5: PANEL, only the panel wakes SCREEN OFF (ui.c scr_input) */
+#if FELUCCA_CPU2
+    {MI_CPU2, PREF_CPU2_ON, {"OFF", "ON (BETA)"}},     /* 1.6.1: ON, the second core (main.c, from the next power-on) */
+#endif
 };
 /* SPEAKER EQ (settings.lowcut, fx.c fx_lowcut): an EQ on the master for the small speaker, not a speaker switch
  * (#42: "OFF" read as the speaker off). FLAT is the old OFF (0, stored as before). The built-in speaker cannot be
@@ -248,6 +266,11 @@ static void menu_put(uint32_t row, uint32_t v)
             ui_prefs = (uint8_t)(v ? ui_prefs | f->bit : ui_prefs & ~f->bit);
         fx_usb_fixed = (ui_prefs & PREF_USB_FIXED) != 0u;   /* (at once; every frame too: ui_input) */
         scope_mix = (ui_prefs2 & (PREF_SCOPE_MIX >> 16)) != 0u;
+#if FELUCCA_CPU2
+        if (row == MI_CPU2)                            /* (the second core starts at power-on only, main.c; and
+                                                        * once running it stays until the next one) */
+            ui_message(v ? "2ND CORE ON: RESTART" : "2ND CORE OFF: RESTART");
+#endif
         return;
     }
     switch (row) {

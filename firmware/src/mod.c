@@ -68,7 +68,7 @@ static uint32_t mod_param(uint32_t d)
     return MD_ENGINE(d) ? P_E0 + d - MD_E1 : ID[d];
 }
 
-static struct {                  /* the part in mix_part (one at a time) */
+typedef struct {                 /* a part's, while mix_part renders it (one per part: two cores render at once, fx.c mix_block) */
     uint8_t on;                  /* a slot is active: track_render calls mod_voice */
     uint8_t amp;                 /* an AMP slot: the voice gain applies */
     uint8_t nv, nk;              /* voice terms, per-block parameters held */
@@ -78,7 +78,15 @@ static struct {                  /* the part in mix_part (one at a time) */
     int8_t vamt[NMSLOT];
     uint8_t kid[NMSLOT];         /* per-block: the parameter, its stored value */
     int16_t keep[NMSLOT];
-} mod;
+} modw_t;
+#if FELUCCA_CPU2
+static modw_t mod_w[NTRK];
+#define MOD(t) (mod_w[C1_PI(t)])
+#else
+static modw_t mod;               /* (one core: the one of 1.6, the same code) */
+#define MOD(t) mod
+#endif
+#define MOD_W_CLEAR() memset(&MOD(&trk[0]), 0, C1_NP * sizeof(modw_t))   /* (the host tests: every part's) */
 
 static uint32_t mod_seed = 0x2545F491u;
 static int16_t mod_rand(void)    /* RAND of a note-on: xorshift32, bipolar */
@@ -165,35 +173,36 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
     const int16_t *p = t->p;
     int32_t lfo, off[NMSLOT];
     uint32_t k, j;
-    mod.on = 0;
+    modw_t *mw = &MOD(t);
+    mw->on = 0;
     for (k = 0; k < NMSLOT; k++)                        /* (VEL and TIME: at the notes, not here) */
         if (p[P_M1SRC + 3u * k] && p[P_M1DST + 3u * k] && p[P_M1AMT + 3u * k] && p[P_M1DST + 3u * k] < MD_VEL)
             break;
     if (k == NMSLOT)
         return 0;
     lfo = mulq15(t->lfo_val, t->lfo_fade);              /* (the LFO of the block before: track_render ticks it) */
-    mod.on = 1;
-    mod.amp = 0;
-    mod.nv = mod.nk = 0;
-    mod.pit = mod.cut = mod.shp = 0;
-    mod.gain = 32767;
-    mod.ldep = mod_depth(t, lfo);                       /* DEPTH first: the other slots see the LFO it leaves */
-    if (mod.ldep < 32767)
-        lfo = mulq15(lfo, mod.ldep);
+    mw->on = 1;
+    mw->amp = 0;
+    mw->nv = mw->nk = 0;
+    mw->pit = mw->cut = mw->shp = 0;
+    mw->gain = 32767;
+    mw->ldep = mod_depth(t, lfo);                       /* DEPTH first: the other slots see the LFO it leaves */
+    if (mw->ldep < 32767)
+        lfo = mulq15(lfo, mw->ldep);
     for (; k < NMSLOT; k++) {
         uint32_t s = (uint32_t)p[P_M1SRC + 3u * k], d = (uint32_t)p[P_M1DST + 3u * k];
         int32_t a = p[P_M1AMT + 3u * k], x;
         if (!s || !d || !a || s >= MS_N || d >= MD_DEPTH)
             continue;
         if (d <= MD_AMP) {                              /* per voice */
-            mod.amp |= d == MD_AMP;
+            mw->amp |= d == MD_AMP;
             if (MS_VOICE(s)) {
-                mod.vsrc[mod.nv] = (uint8_t)s;
-                mod.vdst[mod.nv] = (uint8_t)d;
-                mod.vamt[mod.nv++] = (int8_t)a;
+                mw->vsrc[mw->nv] = (uint8_t)s;
+                mw->vdst[mw->nv] = (uint8_t)d;
+                mw->vamt[mw->nv++] = (int8_t)a;
             } else {                                    /* (a UNI LFO, 0..1, takes AMP as ENV does) */
-                mod_voice_add(s == MS_LFO && p[P_LPOL] ? MS_ENV : s, d, mod_tsrc(t, s, lfo), a, &mod.pit, &mod.cut,
-                              &mod.shp, &mod.gain);
+                mod_voice_add(s == MS_LFO && p[P_LPOL] ? MS_ENV : s, d, mod_tsrc(t, s, lfo), a, &mw->pit, &mw->cut,
+                              &mw->shp, &mw->gain);
             }
             continue;
         }
@@ -201,47 +210,49 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
             uint32_t id = mod_param(d);
             const param_desc_t *pd = id >= P_E0 ? &ENGINES[t->engine]->edit[id - P_E0] : &TP[id];
             x = mod_tsrc(t, s, lfo);
-            for (j = 0; j < mod.nk && mod.kid[j] != id; j++)
+            for (j = 0; j < mw->nk && mw->kid[j] != id; j++)
                 ;
-            if (j == mod.nk) {
-                mod.kid[j] = (uint8_t)id;
-                mod.keep[j] = p[id];
+            if (j == mw->nk) {
+                mw->kid[j] = (uint8_t)id;
+                mw->keep[j] = p[id];
                 off[j] = 0;
-                mod.nk++;
+                mw->nk++;
             }
             off[j] += (((x * a) >> 6) * (pd->max - pd->min)) >> 15;
         }
     }
-    for (j = 0; j < mod.nk; j++) {
-        uint32_t id = mod.kid[j];
+    for (j = 0; j < mw->nk; j++) {
+        uint32_t id = mw->kid[j];
         const param_desc_t *pd = id >= P_E0 ? &ENGINES[t->engine]->edit[id - P_E0] : &TP[id];
-        t->p[id] = (int16_t)clamp(mod.keep[j] + off[j], pd->min, pd->max);
+        t->p[id] = (int16_t)clamp(mw->keep[j] + off[j], pd->min, pd->max);
     }
     return 1;
 }
 
-/* after the part's block (when mod.on): the stored values back */
+/* after the part's block (when mw->on): the stored values back */
 static __attribute__((noinline)) void mod_end(track_t *t)
 {
     uint32_t j;
-    for (j = 0; j < mod.nk; j++)
-        t->p[mod.kid[j]] = mod.keep[j];
-    mod.on = 0;
+    modw_t *mw = &MOD(t);
+    for (j = 0; j < mw->nk; j++)
+        t->p[mw->kid[j]] = mw->keep[j];
+    mw->on = 0;
 }
 
-/* a voice's modulation (voice.c track_render, when mod.on), onto its vmod_t m as track_render made it:
+/* a voice's modulation (voice.c track_render, when mw->on), onto its vmod_t m as track_render made it:
  * pitch (the increment again, with the fine factor fine as there), cutoff and shape (clamped to what the
  * fixed routings can reach), the amplitude (and v->env_out, the next block's start). env: its envelope */
 static __attribute__((noinline)) void mod_voice(track_t *t, voice_t *v, vmod_t *m, int32_t fine)
 {
-    int32_t pit = mod.pit, cut = mod.cut, shp = mod.shp, gain = mod.gain, env = m->envq15;
+    const modw_t *mw = &MOD(t);
+    int32_t pit = mw->pit, cut = mw->cut, shp = mw->shp, gain = mw->gain, env = m->envq15;
     uint32_t k;
     if (v == &t->v[t->m_vi])
         t->m_env = env;                                 /* ENV of the latest note, for per-block destinations */
-    for (k = 0; k < mod.nv; k++) {
-        uint32_t s = mod.vsrc[k];
+    for (k = 0; k < mw->nv; k++) {
+        uint32_t s = mw->vsrc[k];
         int32_t x = s == MS_ENV ? env : s == MS_VEL ? v->mvel * 258 : s == MS_KEY ? mod_key(v->note) : v->mrnd;
-        mod_voice_add(s, mod.vdst[k], x, mod.vamt[k], &pit, &cut, &shp, &gain);
+        mod_voice_add(s, mw->vdst[k], x, mw->vamt[k], &pit, &cut, &shp, &gain);
     }
     if (pit) {
         m->pitch16 = clamp(m->pitch16 + pit, 0, 2047);
@@ -251,7 +262,7 @@ static __attribute__((noinline)) void mod_voice(track_t *t, voice_t *v, vmod_t *
     }
     m->cutoff = clamp(m->cutoff + cut, -150 * 256, 150 * 256);
     m->shape = clamp(m->shape + shp, -62 * 256, 190 * 256);
-    if (mod.amp) {
+    if (mw->amp) {
         m->amp1 = mulq15(m->amp1, gain);
         v->env_out = m->amp1;
     }

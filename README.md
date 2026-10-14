@@ -4,7 +4,7 @@
 
 ![Felucca 1.0](docs/felucca-1.0.png)
 
-Multi-engine synthesizer firmware for the M-VAVE FM-1, **version 1.6**. Connect the FM-1 to a computer by USB, open the
+Multi-engine synthesizer firmware for the M-VAVE FM-1, **version 1.6.1**. Connect the FM-1 to a computer by USB, open the
 [web installer](https://hugelton.github.io/Felucca/) in Chrome or Edge and press Install; no extra hardware is needed.
 Installing is at your own risk: M-VAVE's updater or the installer's **Return to official V15** takes you back.
 Want to look around first? [Try it in your browser](https://hugelton.github.io/Felucca/webapp/try/), no FM-1 needed.
@@ -15,7 +15,7 @@ Want to look around first? [Try it in your browser](https://hugelton.github.io/F
   [Controls](https://github.com/hugelton/Felucca/wiki/Controls) · [Menu](https://github.com/hugelton/Felucca/wiki/Menu) ·
   [Engines](https://github.com/hugelton/Felucca/wiki/Engines) · [Release notes](https://github.com/hugelton/Felucca/wiki/Release-Notes) ·
   [Troubleshooting](https://github.com/hugelton/Felucca/wiki/Troubleshooting)
-- Build: [BUILDING.md](BUILDING.md)
+- Build: [BUILDING.md](BUILDING.md); clone with the engines' submodule: `git clone --recurse-submodules https://github.com/hugelton/Felucca.git`
 
 <a href="https://hugelton.itch.io/felucca"><img src="https://static.itch.io/images/badge-color.svg" alt="Available on itch.io" width="74"></a>
 
@@ -24,6 +24,15 @@ Want to look around first? [Try it in your browser](https://hugelton.github.io/F
 Thirteen engines with factory presets, four tracks (8 voices shared), a 64-step sequencer (chords, ties, chance, conditions,
 ratchets, nudge, locks, automation, live and step recording), SEQ TOOLS, songs, effects, a MOD matrix, MIDI (USB and TRS,
 per-track channels, MIDI LEARN) and USB audio. More: [Features](https://github.com/hugelton/Felucca/wiki/Features).
+
+## New in 1.6.1
+
+- **MENU > LARGE keeps one size per knob** (#251): a value no longer jumps between sizes as you turn the knob
+- **Updates check the package's size on the FM-1**: a package made for another device is refused before anything is erased
+- **Second core (beta), off by default:** MENU > SYSTEM > 2ND CORE > ON (BETA), then restart: the FM-1's second core
+  renders some of the parts, same sound, more headroom (#247)
+- **Felucca-Engines:** ANALOG, LOFI, TRIO, WHEEL and NOISE now live in [their own repository](https://github.com/hugelton/Felucca-Engines)
+  under the MIT licence (a git submodule here); Felucca itself stays GPL-3.0-only
 
 ## New in 1.6
 
@@ -48,7 +57,8 @@ icons or artwork. See [On AI-Assisted Development and Responsibility](https://gi
 
 ## Credits and licence
 
-Free software: [GPL-3.0-only](LICENSE), the Hügelton Sample Pack included; the bundled fonts and ported DSP keep their own licences
+Free software: [GPL-3.0-only](LICENSE), the Hügelton Sample Pack included; the bundled fonts and ported DSP keep their own licences,
+and five engines ([Felucca-Engines](https://github.com/hugelton/Felucca-Engines), `firmware/engines/`) are MIT
 ([LICENSES/](LICENSES/), [LICENSING.md](LICENSING.md)). Thanks to everyone whose work and contributions are in it: [CREDITS.md](CREDITS.md).
 
 M-VAVE and FM-1 are trademarks of their respective owners. Felucca is not affiliated with or endorsed by them.
