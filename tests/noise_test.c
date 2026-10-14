@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* NOISE engine test (src/eng_noise.c) on the Mac, through hostsim.c as regress.c.
+/* NOISE engine test (engines/src/eng_noise.c) on the Mac, through hostsim.c as regress.c.
  *   build/host/noise_test [DEMODIR]          (run_tests.sh: build/noise_demo)
  * 1. colour: the slope of the spectrum (power per Hz, 150 Hz .. 6 kHz, the filter open) at COLR 0 / 64 / 127:
  *    white 0 +-1 dB/oct, pink -3 +-1, brown -6 +-1.5.

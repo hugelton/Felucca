@@ -229,7 +229,11 @@ static uint64_t lg_n[4];
 static char lg_miss[96], lg_wide[16][12], lg_small[16][12];
 static uint32_t lg_nwide, lg_nsmall;
 static void lg_hook(const char *s, int why);
-#define LARGE_HOOK(s, why) lg_hook(s, why)
+static int8_t lg_face[4] = {-1, -1, -1, -1};     /* #251: the face tall card c got in its last draw (0 L, 1 M, 2 S;
+                                                  * c: draw_column_tall's card, where the hook is) */
+static char lg_val[4][16];                       /* .. and its value */
+#define LARGE_HOOK(s, why) (lg_face[c & 3u] = (int8_t)((why) == 0 ? 0 : (why) == 3 ? 2 : 1), \
+                            snprintf(lg_val[c & 3u], 16, "%s", s), lg_hook(s, why))
 static void cs_hook(const char *v, const char *u);
 #define CARD_HOOK(v, u) cs_hook(v, u)
 #define UI_TEST_NO_MAIN 1
@@ -1685,6 +1689,41 @@ static void draw(int s)
 
 /* every value of every column on every page of every engine: labels and values fit their column */
 static uint32_t nsweep, nmotion;
+/* #251, MENU > LARGE: a tall card's value keeps its face (L, M or S) over the whole range of what the knob turns; a
+ * knob whose values take two faces is a finding. lg_span_* around one knob's sweep, lg_span_draw after each draw */
+static uint32_t lg_span_mask, lg_nspan, lg_njump, lg_nface[3];   /* (lg_nface: the knobs set wholly in L, M, S) */
+static char lg_span_ex[3][16];
+static void lg_span_begin(void) { lg_span_mask = 0; memset(lg_span_ex, 0, sizeof lg_span_ex); }
+static void lg_span_draw(uint32_t c)
+{
+    int f = lg_face[c & 3u];
+    if (f < 0) return;
+    lg_span_mask |= 1u << f;
+    if (!lg_span_ex[f][0]) snprintf(lg_span_ex[f], 16, "%s", lg_val[c & 3u]);
+}
+static void lg_span_end(uint32_t c, const char *label)
+{
+    if (!lg_span_mask) return;
+    lg_nspan++;
+    if (!(lg_span_mask & (lg_span_mask - 1u)))
+        lg_nface[lg_span_mask == 1u ? 0 : lg_span_mask == 2u ? 1 : 2]++;
+    if (lg_span_mask & (lg_span_mask - 1u)) {
+        lg_njump++;
+        nfind++;
+        if (rep) fprintf(rep, "FIND %-26s K%u %s: its values change size (L '%s' M '%s' S '%s')\n", cur_name, c + 1u,
+                         label, lg_span_ex[0], lg_span_ex[1], lg_span_ex[2]);
+    }
+}
+static void lg_draw_one(uint32_t c)                  /* the four cards drawn, card c's face noted */
+{
+    nscr = npend = 0;
+    ui.force = 1;
+    lg_face[c & 3u] = -1;
+    draw_columns();
+    lint();
+    nsweep++;
+    lg_span_draw(c);
+}
 /* #63: the page drawn again with MOTION driving each of its cards' track parameters (the motion icon beside
  * every label, the long ones too): the lint over it; the motion cleared again */
 static void sweep_motion(void)
@@ -1727,15 +1766,13 @@ static void sweep_columns(void)
                 int32_t v, v0;
                 if (!d || !d->label || d->label[0] == '-' || PAGES[i].graph == GR_MOD) continue;
                 v0 = *vp;
+                lg_span_begin();
                 for (v = d->min; v <= d->max; v++) {
                     *vp = (int16_t)v;
-                    nscr = npend = 0;
-                    ui.force = 1;
-                    draw_columns();
-                    lint();
-                    nsweep++;
-                    if (v - d->min > 300) v = d->max - 1;      /* wide ranges: the ends */
+                    lg_draw_one(c);
+                    if (!large_on && v - d->min > 300) v = d->max - 1;   /* wide ranges: the ends (LARGE: all, #251) */
                 }
+                lg_span_end(c, d->label);
                 *vp = (int16_t)v0;
             }
             draw(-1);                                    /* the whole page */
@@ -1754,6 +1791,19 @@ static void sweep_columns(void)
         draw(-1);
         lint();
         sweep_motion();
+        for (c = 0; c < 4u; c++) {                       /* every value of HOME's four knobs (#251: under LARGE too) */
+            int16_t *vp;
+            const param_desc_t *d = home_param(c, &vp);
+            int32_t v, v0 = *vp;
+            if (!d || !d->label || d->label[0] == '-') continue;
+            lg_span_begin();
+            for (v = d->min; v <= d->max; v++) {
+                *vp = (int16_t)v;
+                lg_draw_one(c);
+            }
+            lg_span_end(c, d->label);
+            *vp = (int16_t)v0;
+        }
         state(); pal(UI_GREY_INDEX); eng(e); go_home(); ui_home_view = HV_TRACKS;   /* 1.3: HOME > TRACKS, this engine on */
         for (i = 0; i < NTRK; i++)                                                 /* every row, every one muted */
             trk[i].p[P_MUTE] = 1, set_engine_of(&trk[i], e);
@@ -1780,19 +1830,40 @@ static void sweep_columns(void)
                             b = fop_byte(f); mb = (5u - o) * FP_OP + FP_MODE;
                             fm6_patch[song.sel][mb] = (uint8_t)m;
                             v0 = fm6_patch[song.sel][b];
+                            lg_span_begin();
                             for (v = 0; v <= fm6_max(b); v++) {
                                 fm6_patch[song.sel][b] = (uint8_t)v;
-                                nscr = npend = 0;
-                                ui.force = 1;
-                                draw_columns();
-                                lint();
-                                nsweep++;
+                                lg_draw_one(k);
                             }
+                            lg_span_end(k, PG[g]);
                             fm6_patch[song.sel][b] = (uint8_t)v0;
                             fm6_pgen[song.sel]++;
                             draw(-1);
                             lint();
                         }
+        }
+    }
+    {   /* the MOD page's cards: every source, destination (with each source) and amount, card by card (#251) */
+        int32_t v, sr;
+        for (e = 0; e < NENGINES; e++) {
+            if (!eng_ok(e)) continue;
+            state(); pal(UI_GREY_INDEX); eng(e); go_title("MOD");
+            snprintf(name, sizeof name, "%s%s/MOD cards", large_on ? "LARGE " : "", ENGINES[e]->name);
+            cur_name = name;
+            mod_ui_slot = 0;
+            lg_span_begin();
+            for (v = 0; v < MS_N; v++) { TSEL->p[P_M1SRC] = (int16_t)v; lg_draw_one(1); }
+            lg_span_end(1, "SRC");
+            for (sr = 0; sr < MS_N; sr++) {
+                TSEL->p[P_M1SRC] = (int16_t)sr;
+                lg_span_begin();
+                for (v = 0; v < MD_N; v++) { TSEL->p[P_M1DST] = (int16_t)v; lg_draw_one(2); }
+                lg_span_end(2, "DST");
+            }
+            TSEL->p[P_M1SRC] = 1; TSEL->p[P_M1DST] = 1;
+            lg_span_begin();
+            for (v = TP[P_M1AMT].min; v <= TP[P_M1AMT].max; v++) { TSEL->p[P_M1AMT] = (int16_t)v; lg_draw_one(3); }
+            lg_span_end(3, "AMT");
         }
     }
     for (e = 0; e < 4u; e++) {                           /* the MOD page: every source and destination */
@@ -2305,6 +2376,11 @@ int main(int argc, char **argv)
         fprintf(rep, "\n  in S, e.g.:");
         for (s = 0; s < lg_nsmall; s++) fprintf(rep, " '%s'", lg_small[s]);
         fprintf(rep, "\n");
+        fprintf(rep, "  #251: %u knobs swept tall, %u whose values change size; %u wholly in L, %u in M, %u in S\n", lg_nspan,
+                lg_njump, lg_nface[0], lg_nface[1], lg_nface[2]);
+        printf("ui_render: MENU > LARGE: %u knobs swept tall, %u whose values change size (#251); %u in L, %u in M, %u in S\n",
+               lg_nspan, lg_njump, lg_nface[0], lg_nface[1], lg_nface[2]);
+        if (lg_nspan < 100u) { fprintf(stderr, "ui_render: LARGE swept %u knobs tall only\n", lg_nspan); return 1; }
     }
     {   /* every FM6 chart (the lint above, fmp_check, runs on each), in GREY: gray */
         uint32_t a, c0 = fmp_charts;

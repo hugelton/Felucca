@@ -131,7 +131,7 @@ static int humanize(void)
     trk_all_off(t);
     mslot(t, 1, MS_RAND, MD_VEL, 40);
     mslot(t, 2, MS_RAND, MD_TIME, 40);
-    ok &= mod_begin(t) == 0 && !mod.on;                 /* (no per-block work for VEL / TIME) */
+    ok &= mod_begin(t) == 0 && !MOD(t).on;              /* (no per-block work for VEL / TIME) */
     mslot(t, 3, MS_LFO, MD_CUT, 10);
     ok &= mod_begin(t) == 1;
     mod_end(t);

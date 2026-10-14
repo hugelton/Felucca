@@ -134,6 +134,28 @@ static uint32_t flash_off(const uint8_t *lg)        /* flash.bin offset in the l
     return 0;
 }
 
+/* rewrite flash.bin's size in the logical image's UFW entry list (the entries' and the header's CRCs too): a package
+ * of the same chip whose app area is another board's size */
+static void set_fl_size(uint8_t *lg, uint32_t size)
+{
+    uint8_t h[0x40 + 11 * 0x50];
+    uint32_t i, n;
+    memcpy(h, lg, sizeof h);
+    ota_jl_enc(h, 0x40);
+    n = ota_rd16(h + 8);
+    for (i = 0; i < n; i++) {
+        uint8_t *e = h + 0x40 + i * 0x50u;
+        ota_jl_enc(e, 0x50);
+        if (ota_rd16(e) == 0)
+            ota_wr32(e + 12, size);
+        ota_jl_enc(e, 0x50);
+    }
+    ota_wr16(h + 2, ota_crc16(h + 0x40, n * 0x50u, 0));   /* (over the entries as stored) */
+    ota_wr16(h, ota_crc16(h + 2, 0x3E, 0));
+    ota_jl_enc(h, 0x40);
+    memcpy(lg, h, 0x40 + n * 0x50u);
+}
+
 static int check(const char *what, int ok) { printf("%-56s %s\n", what, ok ? "ok" : "FAIL"); return ok ? 0 : 1; }
 
 int main(int argc, char **argv)
@@ -163,6 +185,22 @@ int main(int argc, char **argv)
         memcpy(nor + 0xA0F00, r, sizeof r);
         memcpy(user, nor + 0xA0000, sizeof user);
     }
+    /* 1.6.1: flash.bin must be exactly this board's [0, app area end): a package with another board's size (an
+     * SMK-37's app area ends at 0x9D000, the FM-1's at 0x93000; one byte short too) is refused before any erase */
+    {
+        static const uint32_t SZ[2] = {0x9D000u, LDR_APP_HI - 1u};
+        uint32_t k;
+        for (k = 0; k < 2u; k++) {
+            set_fl_size(logical, SZ[k]);
+            erases = 0;
+            rc = ldr_session();
+            bad += check(k ? "flash.bin a byte short of the app area: refused, nothing erased" :
+                             "another board's size (0x9D000): refused (-14), nothing erased",
+                         rc == -14 && erases == 0 && !memcmp(nor + 0x4000, old + ofo + 0x4000, 0x93000 - 0x4000));
+        }
+        set_fl_size(logical, LDR_APP_HI);           /* back: this board's size, the install below takes it */
+        requests = 0;
+    }
     /* a damaged package (one byte deep in the app area): refused before anything is erased */
     {
         size_t at = nfo + 0x50123u;
@@ -178,7 +216,7 @@ int main(int argc, char **argv)
     flip_addr = nfo + 0x20000u; flip_on = 2; flip_seen = 0;
     rc = ldr_session();
     printf("  rc %d, %u requests, %u sector erases\n", rc, requests, erases);
-    bad += check("install completes", rc == 0);
+    bad += check("install completes (flash.bin exactly the app area, 0x93000)", rc == 0);
     bad += check("a sector changed in transfer after the check is read again", flip_seen == 3);
     flip_addr = 0xFFFFFFFFu;
     bad += check("app area == the new package's flash.bin", !memcmp(nor + 0x4000, logical + nfo + 0x4000, 0x93000 - 0x4000));

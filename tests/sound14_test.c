@@ -86,7 +86,7 @@ static void fresh(uint32_t e, uint32_t pi)        /* the boot state (no FX tails
     rng_state = 0x1234567u;
     mod_seed = 0x2545F491u;
     memset(trk, 0, sizeof trk);
-    memset(&mod, 0, sizeof mod);
+    MOD_W_CLEAR();
     memset(sl, 0, sizeof sl);
     host_tracks_init();
     for (k = 0; k < NPART; k++)
@@ -236,43 +236,43 @@ static void test_matrix(void)
     slot(t, 0, MS_MODW, MD_DEPTH, 63);
     t->mw = 0;
     mod_begin(t);
-    check("MODW -> DEPTH +63: the wheel down closes the LFO (gain 1.6 %)", mod.on && mod.ldep >= 500 && mod.ldep <= 512);
+    check("MODW -> DEPTH +63: the wheel down closes the LFO (gain 1.6 %)", MOD(t).on && MOD(t).ldep >= 500 && MOD(t).ldep <= 512);
     mod_end(t);
     t->mw = 127;
     mod_begin(t);
-    check("MODW -> DEPTH +63: the wheel up leaves it whole", mod.ldep >= 32700);
+    check("MODW -> DEPTH +63: the wheel up leaves it whole", MOD(t).ldep >= 32700);
     mod_end(t);
     slot(t, 0, MS_MODW, MD_DEPTH, -64);
     mod_begin(t);
-    check("MODW -> DEPTH -64: the wheel up closes it", mod.ldep == 0);
+    check("MODW -> DEPTH -64: the wheel up closes it", MOD(t).ldep == 0);
     mod_end(t);
     slot(t, 0, MS_MODW, MD_DEPTH, 63);
     slot(t, 1, MS_LFO, MD_CUT, 63);
     t->mw = 0;
     mod_begin(t);
     check("DEPTH scales the matrix's LFO source too (LFO -> CUT with the wheel down: ~1.6 %)",
-          mod.cut > 0 && mod.cut < ((32767 * 63) >> 7) / 40);
+          MOD(t).cut > 0 && MOD(t).cut < ((32767 * 63) >> 7) / 40);
     mod_end(t);
     slot(t, 2, MS_AT, MD_DEPTH, 63);
     t->mw = 127;
     t->at = 64;
     mod_begin(t);
-    check("two DEPTH slots multiply (wheel up x AT half)", mod.ldep > 16000 && mod.ldep < 17000);
+    check("two DEPTH slots multiply (wheel up x AT half)", MOD(t).ldep > 16000 && MOD(t).ldep < 17000);
     mod_end(t);
     slot(t, 0, MS_LFO, MD_DEPTH, 63);                     /* the LFO on its own depth: the unscaled LFO */
     slot(t, 1, 0, 0, 0);
     slot(t, 2, 0, 0, 0);
     mod_begin(t);
-    check("LFO -> DEPTH: takes the LFO unscaled (at its top: whole)", mod.ldep >= 32700);
+    check("LFO -> DEPTH: takes the LFO unscaled (at its top: whole)", MOD(t).ldep >= 32700);
     mod_end(t);
     slot(t, 0, MS_SH, MD_CUT, 40);                        /* no DEPTH slot: the LFO untouched */
     mod_begin(t);
-    check("no DEPTH slot: the LFO untouched (track_render leaves it alone)", mod.ldep == 32767);
+    check("no DEPTH slot: the LFO untouched (track_render leaves it alone)", MOD(t).ldep == 32767);
     mod_end(t);
     slot(t, 0, 11, MD_CUT, 40);                           /* past the lists: nothing */
     slot(t, 1, MS_LFO, MD_N, 40);
     mod_begin(t);
-    check("a SRC / DST past the lists does nothing", mod.cut == 0 && mod.nk == 0 && mod.nv == 0);
+    check("a SRC / DST past the lists does nothing", MOD(t).cut == 0 && MOD(t).nk == 0 && MOD(t).nv == 0);
     mod_end(t);
 }
 

@@ -19,7 +19,7 @@ static uint8_t *logical;
 static size_t logical_len;
 static uint8_t rx[1024];                 /* one pending host frame (7-bit bytes) */
 static uint32_t rx_len, rx_full;
-static uint32_t now_ms, requests, ident_replies, mute_after = 0xFFFFFFFFu, bad_erase;
+static uint32_t now_ms, requests, ident_replies, mute_after = 0xFFFFFFFFu, bad_erase, erases;
 static int committed;
 static uint8_t committed_parm[112];
 static int32_t last_code;
@@ -98,6 +98,7 @@ static void ota_idle(void) { now_ms += 1; }
 static int ota_erase(uint32_t off)
 {
     if (off < 0xE0000u || off >= 0xE5000u || (off & 0xFFFu)) { bad_erase++; return -8; }
+    erases++;
     memset(nor + off, 0xFF, 4096);
     return 0;
 }
@@ -130,6 +131,28 @@ static uint32_t ota_body_off(void)                  /* ota.bin data + 0x20 in th
     return 0;
 }
 
+/* rewrite flash.bin's size in the logical image's UFW entry list (the entries' and the header's CRCs too): a package
+ * of the same chip whose app area is another board's size */
+static void set_fl_size(uint8_t *lg, uint32_t size)
+{
+    uint8_t h[0x40 + 11 * 0x50];
+    uint32_t i, n;
+    memcpy(h, lg, sizeof h);
+    ota_jl_enc(h, 0x40);
+    n = ota_rd16(h + 8);
+    for (i = 0; i < n; i++) {
+        uint8_t *e = h + 0x40 + i * 0x50u;
+        ota_jl_enc(e, 0x50);
+        if (ota_rd16(e) == 0)
+            ota_wr32(e + 12, size);
+        ota_jl_enc(e, 0x50);
+    }
+    ota_wr16(h + 2, ota_crc16(h + 0x40, n * 0x50u, 0));   /* (over the entries as stored) */
+    ota_wr16(h, ota_crc16(h + 2, 0x3E, 0));
+    ota_jl_enc(h, 0x40);
+    memcpy(lg, h, 0x40 + n * 0x50u);
+}
+
 static int check(const char *what, int ok)
 {
     printf("%-52s %s\n", what, ok ? "ok" : "FAIL");
@@ -148,7 +171,7 @@ static void reset_dev(void)
     memset(nor, 0xFF, sizeof nor);
     memcpy(nor, logical + 0x400, 0x4000);                 /* device flash head = package flash.bin head */
     rx_full = 0; requests = 0; ident_replies = 0; committed = 0; last_code = 0;
-    mute_after = 0xFFFFFFFFu; corrupt_at = NULL; bad_erase = 0;
+    mute_after = 0xFFFFFFFFu; corrupt_at = NULL; bad_erase = 0; erases = 0;
 }
 
 int main(int argc, char **argv)
@@ -184,7 +207,7 @@ int main(int argc, char **argv)
     reset_dev();
     rc = ota_session();
     printf("  %u requests\n", requests);
-    bad += check("session commits", rc == 0 && committed);
+    bad += check("session commits (flash.bin exactly 0x93000)", rc == 0 && committed);
     bad += check("headers + loader + confirm, no head reads", requests >= 10 && requests <= 30);
     {
         uint8_t *h = nor + 0xE0000, *p = committed_parm;
@@ -201,6 +224,17 @@ int main(int argc, char **argv)
     bad += check("boot cleanup erases the area", ota_boot_cleanup() == 1 && area_erased());
     bad += check("second boot: nothing to do", ota_boot_cleanup() == 0);
 
+    /* 1.6.1: another board's package (flash.bin not this board's app area size): refused in step 1, nothing erased */
+    {
+        uint8_t keep[0x40 + 11 * 0x50];
+        memcpy(keep, logical, sizeof keep);
+        reset_dev();
+        set_fl_size(logical, 0x9D000u);
+        rc = ota_session();
+        bad += check("another board's size (0x9D000): -15, no commit, no erase", rc == -15 && !committed && erases == 0 &&
+                     area_erased());
+        memcpy(logical, keep, sizeof keep);
+    }
     /* host disappears in the middle */
     reset_dev();
     mute_after = 4;
