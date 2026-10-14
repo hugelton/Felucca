@@ -214,7 +214,7 @@ static void ui_power_on(void)
     panic_req = 0;
     mi_r = mi_w = midi_in_overflow = 0;
     memset(midi_sel_on, 0, sizeof midi_sel_on);
-    memset(midi_ch, 0, sizeof midi_ch);
+    memset(midi_ch, 0, sizeof midi_ch); midi_nrpn_reset();
     memset(midi_owners, 0, sizeof midi_owners);
     memset(midi_bend_q8, 0, sizeof midi_bend_q8);
     memset(midi_bend_target, 0, sizeof midi_bend_target);
