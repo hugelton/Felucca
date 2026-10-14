@@ -34,7 +34,7 @@ per-track channels, MIDI LEARN) and USB audio. More: [Features](https://github.c
 
 All changes and what to know before going back: [Release notes](https://github.com/hugelton/Felucca/wiki/Release-Notes) · [Upgrading from 1.1.5](https://github.com/hugelton/Felucca/wiki/Upgrading-from-1.1.5).
 
-## MIDI NRPN (fork)
+## MIDI NRPN
 
 NRPN input controls 82 common parameters and E1-E8 of the current engine without
 using MIDI LEARN slots. Send CC99/98 to select a parameter and CC6 for its 7-bit
