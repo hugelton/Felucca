@@ -25,6 +25,12 @@ Thirteen engines with factory presets, four tracks (8 voices shared), a 64-step 
 ratchets, nudge, locks, automation, live and step recording), SEQ TOOLS, songs, effects, a MOD matrix, MIDI (USB and TRS,
 per-track channels, MIDI LEARN) and USB audio. More: [Features](https://github.com/hugelton/Felucca/wiki/Features).
 
+## Unreleased
+
+- **TRS MIDI clock under CC load:** timestamp incoming TRS MIDI while audio is rendering, so long
+  renders do not batch clock pulses and disturb the external tempo estimate. USB MIDI polling
+  remains deferred; no additional setting is needed.
+
 ## New in 1.6.1
 
 - **MENU > LARGE keeps one size per knob** (#251): a value no longer jumps between sizes as you turn the knob

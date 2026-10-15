@@ -28,4 +28,7 @@ thanks the work below; each keeps its own licence (see [LICENSE](LICENSE), [LICE
   [zednaked](https://github.com/zednaked) (ratchets, #100),
   [jasonpersinger](https://github.com/jasonpersinger) (the ROOM reverb click fix, #121),
   [renebohne](https://github.com/renebohne) (MIDI Program Change, #179),
+  [bonszaimusic](https://www.youtube.com/@bonszaimusic) / [fgunited](https://github.com/fgunited)
+  (TRS MIDI clock timestamping under CC load)
+,
   [gospodindilly-ops](https://github.com/gospodindilly-ops) (the second core, #247)
