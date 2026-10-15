@@ -25,6 +25,10 @@ Thirteen engines with factory presets, four tracks (8 voices shared), a 64-step 
 ratchets, nudge, locks, automation, live and step recording), SEQ TOOLS, songs, effects, a MOD matrix, MIDI (USB and TRS,
 per-track channels, MIDI LEARN) and USB audio. More: [Features](https://github.com/hugelton/Felucca/wiki/Features).
 
+## Unreleased
+
+- **External MIDI clock phase:** keep sequencers, ARPs and the metronome in musical time without accumulating integer rounding error. Straight, triplet and long divisions retain fractional timing, and ARPs retain step overshoot. Internal-clock rendering and saved formats stay unchanged.
+
 ## New in 1.6.1
 
 - **MENU > LARGE keeps one size per knob** (#251): a value no longer jumps between sizes as you turn the knob

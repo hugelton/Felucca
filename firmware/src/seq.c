@@ -231,6 +231,35 @@ static int rec_on(const track_t *t) { return ((song.rec >> trk_index(t)) & 1u) &
 enum { AM_OFF, AM_UP, AM_DN, AM_UPDN, AM_RND, AM_ORD, AM_REPEAT, AM_DNUP, AM_UP8, AM_CONV, AM_DIVG, AM_PINKY,
        AM_THUMB, AM_WALK, AM_CHORD };
 
+/* External clock advances exact quarter notes; sequencer/ARP periods are whole
+ * samples. Carry the fractional difference instead of accumulating floor()
+ * error each step. Separate carries retain polymeter and each ARP rate. */
+#define MIDI_CLOCK_GRID 24000u                    /* fixed units per quarter, divisible by every DIV denominator */
+typedef struct { uint32_t remainder; } midi_grid_t;
+static midi_grid_t midi_seq_grid[NTRK], midi_arp_grid[NPART], midi_click_grid, midi_beat_grid;
+static __attribute__((noinline)) void midi_grid_reset(void)
+{
+    memset(midi_seq_grid, 0, sizeof midi_seq_grid);
+    memset(midi_arp_grid, 0, sizeof midi_arp_grid);
+    memset(&midi_click_grid, 0, sizeof midi_click_grid);
+    memset(&midi_beat_grid, 0, sizeof midi_beat_grid);
+}
+static __attribute__((noinline)) uint32_t midi_grid_advance(midi_grid_t *g, uint32_t n, uint32_t div)
+{
+    uint32_t quarter = beat_samples();
+    if (div < 6u) quarter = (quarter / DIV_DEN[div]) * DIV_DEN[div];
+    /* n <= GRID/2 and quarter <= 66150: numerator fits uint32_t. */
+    uint32_t numerator = n * quarter + g->remainder;
+    uint32_t samples = numerator / MIDI_CLOCK_GRID;
+    g->remainder = numerator % MIDI_CLOCK_GRID;
+    return samples;
+}
+static __attribute__((noinline)) uint32_t midi_seq_preview(const track_t *t, uint32_t n)
+{
+    midi_grid_t copy = midi_seq_grid[trk_index(t)];
+    return midi_grid_advance(&copy, n, (uint32_t)t->p[P_SDIV]);
+}
+
 static void arp_forget(track_t *t)               /* (its notes ended otherwise: trk_all_off) */
 {
     t->arp_note = t->arp_ch[0] = t->arp_ch[1] = t->arp_ch[2] = 0;
@@ -424,6 +453,20 @@ static __attribute__((noinline)) void arp_fire(track_t *t, uint32_t period)
     }
 }
 
+static __attribute__((noinline)) void arp_external_due(track_t *t, uint32_t period, int32_t sw)
+{
+    uint32_t duration = period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw);
+    while (t->arp_pos >= duration) {
+        t->arp_pos -= duration;
+        arp_fire(t, period);
+        duration = period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw);
+    }
+    if (t->arp_note) {
+        if (t->arp_off <= t->arp_pos) arp_off(t);
+        else t->arp_off -= t->arp_pos;
+    }
+}
+
 static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
 {
     uint32_t period;
@@ -444,6 +487,11 @@ static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
     t->arp_pos += n;
     if (t->arp_pos < period + (uint32_t)((t->arp_idx & 1u) ? sw : -sw) && t->arp_pos != 0xFFFFFFF + n)
         return;
+    if (song.g[G_CLOCK] && t->arp_pos != 0xFFFFFFFu + n) {
+        arp_external_due(t, period, sw);
+        return;
+    }
+    if (song.g[G_CLOCK]) midi_arp_grid[trk_index(t)].remainder = 0;
     t->arp_pos = 0;
     arp_fire(t, period);
 }
@@ -821,6 +869,7 @@ static void keyboard_block(void)
 static void seq_start(void)
 {
     uint32_t i;
+    midi_grid_reset();
     motion_begin();
     chain_start();
     for (i = 0; i < NTRK; i++) {                   /* every track from its step 0, together */
@@ -1157,6 +1206,8 @@ static __attribute__((noinline)) void seq_enter(track_t *t, uint32_t top, uint32
 static void seq_tick(track_t *t, uint32_t n)
 {
     uint32_t period, len, top;
+    if (song.g[G_CLOCK])
+        n = midi_grid_advance(&midi_seq_grid[trk_index(t)], n, (uint32_t)t->p[P_SDIV]);
     if (t->seq_n && !t->seq_hold) {
         if (t->seq_off <= n)
             seq_release(t);
@@ -1263,6 +1314,7 @@ static __attribute__((noinline)) void cin_record(void)
 /* the metronome's beat: adv samples on while the transport runs (click.c sounds it in this block) */
 static void click_tick(uint32_t adv)
 {
+    if (song.g[G_CLOCK]) adv = midi_grid_advance(&midi_click_grid, adv, 2u);
     uint32_t p = div_samples(2), beat = 0;
     if (clk_pos == CLK_START) {
         clk_pos = 0;
@@ -1398,16 +1450,18 @@ static void events_block(uint32_t n)
     }
     if (aud_req)
         seq_audition();                               /* (STEP PREVIEW: a step sounds, stopped) */
-    chain_tick(seq_n);
+    chain_tick(clock_mode && chain.running ? midi_seq_preview(&trk[chain.clk], seq_n) : seq_n);
     for (i = 0; i < NTRK; i++)
         seq_tick(&trk[i], seq_n);
     if (cin_flush)
         cin_record();
     if (song.playing)
         click_tick(seq_n);
-    for (i = 0; i < NPART; i++)
-        arp_step(&trk[i], clock_mode ? seq_n : n, clock_mode && song.playing ? seq_n : n);
-    beat_pos += clock_mode ? seq_n : n;               /* the beat the ARP LED flashes on (ui_leds) */
+    for (i = 0; i < NPART; i++) {
+        uint32_t arp_n = clock_mode ? midi_grid_advance(&midi_arp_grid[i], seq_n, (uint32_t)trk[i].p[P_ARATE]) : n;
+        arp_step(&trk[i], arp_n, clock_mode && song.playing ? arp_n : n);
+    }
+    beat_pos += clock_mode ? midi_grid_advance(&midi_beat_grid, seq_n, 0u) : n; /* ARP LED beat */
     if (beat_pos >= beat_samples()) {
         beat_pos -= beat_samples();
         beat_pos = beat_pos < beat_samples() ? beat_pos : 0u;
