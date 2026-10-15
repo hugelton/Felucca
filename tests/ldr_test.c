@@ -3,14 +3,43 @@
 /* Host test of the Felucca update loader (firmware/loader/ldr_core.c): a fake
  * host serves a package over the SysEx protocol, the "device" flash starts as
  * another package's flash.bin (as if that firmware were installed).
- *   ldr_test OLD.fwsc NEW.fwsc */
+ *   ldr_test OLD.fwsc NEW.fwsc
+ * With -DBOARD_SMK37=1 (packages from fm1pkg_make.py --board smk37): the SMK-37 Pro windows (app area
+ * up to 0x9D000, records 0x9D000..0xBFFFF) and the protected ranges BTIF / USRTRIM 0xC0000..0xC1FFF,
+ * USR 0xF4000..0xFDFFF and key_mac 0xFF000 never touched, even with a valid-looking record in them. */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #define __attribute__(x)   /* (the sources' .pool sections: no Mach-O section names) */
 
+#if BOARD_SMK37
+#define FELUCCA_ID "ota-SMK-37 Pro_900"
+#define T_APP_HI 0x9D000u                   /* end of the app area the loader writes */
+#define T_REC 0xBFF00u                      /* the SMK build's update record (ota.c OTA_RES) */
+#define T_REC2 0xAEF00u                     /* a record elsewhere in the VM (the stock app's staging is not fixed) */
+#define T_ERASE_LO 0x9D000u                 /* records: the VM only */
+#define T_ERASE_HI 0xC0000u                 /* nothing erased at or above (BTIF, USRTRIM, ...) */
+#define T_DATA_LO 0u                        /* no store range skipped (user samples are in USRFLASH) */
+#define T_DATA_HI 0u
+#define T_USER 0xC2000u                     /* user sample data (USR1), outside the record window */
+#define T_FL_OTHER 0x93000u                 /* another board's (the FM-1's) flash.bin size */
+#define T_FL_OTHER_NAME "0x93000"
+#define T_FL_NAME "0x9D000"
+#else
 #define FELUCCA_ID "ota-FM-1_900"
+#define T_APP_HI 0x93000u
+#define T_REC 0xE4F00u
+#define T_REC2 0xE8F00u                     /* the stock firmware's */
+#define T_ERASE_LO 0x4000u
+#define T_ERASE_HI 0xFC000u
+#define T_DATA_LO 0x97000u
+#define T_DATA_HI 0xE0000u
+#define T_USER 0xA0000u
+#define T_FL_OTHER 0x9D000u                 /* an SMK-37 Pro package's flash.bin size */
+#define T_FL_OTHER_NAME "0x9D000"
+#define T_FL_NAME "0x93000"
+#endif
 #define FELUCCA_OTA_DRYRUN 0
 
 static uint8_t nor[0x100000], *logical;
@@ -84,7 +113,8 @@ static void ota_commit(const uint8_t *parm) { (void)parm; }
 static int ldr_fread(uint32_t off, void *p, uint32_t n) { memcpy(p, nor + off, n); return 0; }
 static int ldr_erase(uint32_t off)
 {
-    if (off < 0x4000u || off >= 0xFC000u || (off & 0xFFFu) || (off >= 0x97000u && off < 0xE0000u)) bad_range++;
+    if (off < 0x4000u || off >= T_ERASE_HI || (off & 0xFFFu) || (off >= T_DATA_LO && off < T_DATA_HI) ||
+        (off >= T_APP_HI && off < T_ERASE_LO)) bad_range++;
     if (off < 0x4000u) { printf("ERASE IN THE HEAD %#x\n", off); exit(1); }
     erases++;
     memset(nor + off, 0xFF, 0x1000);
@@ -94,7 +124,7 @@ static int ldr_prog(uint32_t off, const void *p, uint32_t n)
 {
     const uint8_t *s = p;
     uint32_t i;
-    if (off < 0x4000u || off + n > 0x93000u || ((off & 0xFFu) + n) > 256u) bad_range++;
+    if (off < 0x4000u || off + n > T_APP_HI || ((off & 0xFFu) + n) > 256u) bad_range++;
     for (i = 0; i < n; i++) nor[off + i] &= s[i];
     return 0;
 }
@@ -158,6 +188,43 @@ static void set_fl_size(uint8_t *lg, uint32_t size)
 
 static int check(const char *what, int ok) { printf("%-56s %s\n", what, ok ? "ok" : "FAIL"); return ok ? 0 : 1; }
 
+static void put_record_at(uint32_t at)              /* a valid update record (the SPL runs the loader) */
+{
+    uint8_t r[112] = {0};
+    r[2] = 0x0D; r[3] = 0x5A; r[4] = 0x01; r[5] = 0x5A; r[6] = 0x41; r[7] = 0x54;
+    ota_wr16(r, ota_crc16(r + 2, 78, 0));
+    memcpy(nor + at, r, sizeof r);
+}
+
+#if BOARD_SMK37
+/* the SMK's protected ranges: a pattern, and a valid-looking record in BTIF, USRTRIM and USR */
+static const uint32_t PROT[][2] = {{0xC0000u, 0xC2000u}, {0xF4000u, 0xFE000u}, {0xFF000u, 0x100000u}};
+static uint8_t prot_img[sizeof nor];
+static void protect_fill(void)
+{
+    uint32_t i, k;
+    for (k = 0; k < sizeof PROT / sizeof PROT[0]; k++)
+        for (i = PROT[k][0]; i < PROT[k][1]; i++)
+            nor[i] = (uint8_t)(i * 13u + 5u);
+    memcpy(nor + 0xC1224u, "trimdat", 8);
+    put_record_at(0xC1F00u);                       /* USRTRIM sector: must never be erased */
+    put_record_at(0xC0F00u);                       /* BTIF */
+    put_record_at(0xF4F00u);                       /* USR */
+    memcpy(prot_img, nor, sizeof nor);
+}
+static int protect_ok(void)
+{
+    uint32_t k;
+    for (k = 0; k < sizeof PROT / sizeof PROT[0]; k++)
+        if (memcmp(nor + PROT[k][0], prot_img + PROT[k][0], PROT[k][1] - PROT[k][0]))
+            return 0;
+    return 1;
+}
+#else
+static void protect_fill(void) {}
+static int protect_ok(void) { return 1; }
+#endif
+
 int main(int argc, char **argv)
 {
     size_t olen;
@@ -170,33 +237,29 @@ int main(int argc, char **argv)
     logical = load_logical(argv[2], &logical_len);
     ofo = flash_off(old);
     nfo = flash_off(logical);
-    /* device: OLD installed, plus a valid update record at 0xE4F00 (Felucca's step 1) and 0xE8F00 (the stock
-     * firmware's, a first install from it); user sample data in Felucca's store that looks like a record */
+    /* device: OLD installed, plus a valid update record at T_REC (Felucca's step 1; FM-1 0xE4F00) and T_REC2 (FM-1:
+     * the stock firmware's 0xE8F00, a first install from it); user sample data that looks like a record */
     memset(nor, 0xFF, sizeof nor);
-    memcpy(nor, old + ofo, 0x93000);
+    memcpy(nor, old + ofo, T_APP_HI);
+    protect_fill();
     memcpy(head, nor, sizeof head);
-    {
-        uint8_t r[112] = {0};
-        r[2] = 0x0D; r[3] = 0x5A; r[4] = 0x01; r[5] = 0x5A; r[6] = 0x41; r[7] = 0x54;
-        ota_wr16(r, ota_crc16(r + 2, 78, 0));
-        memcpy(nor + 0xE4F00, r, sizeof r);
-        memcpy(nor + 0xE8F00, r, sizeof r);
-        for (i = 0; i < 0x1000u; i++) nor[0xA0000 + i] = (uint8_t)(i * 7u);
-        memcpy(nor + 0xA0F00, r, sizeof r);
-        memcpy(user, nor + 0xA0000, sizeof user);
-    }
+    put_record_at(T_REC);
+    put_record_at(T_REC2);
+    for (i = 0; i < 0x1000u; i++) nor[T_USER + i] = (uint8_t)(i * 7u);
+    put_record_at(T_USER + 0xF00u);
+    memcpy(user, nor + T_USER, sizeof user);
     /* 1.6.1: flash.bin must be exactly this board's [0, app area end): a package with another board's size (an
      * SMK-37's app area ends at 0x9D000, the FM-1's at 0x93000; one byte short too) is refused before any erase */
     {
-        static const uint32_t SZ[2] = {0x9D000u, LDR_APP_HI - 1u};
+        static const uint32_t SZ[2] = {T_FL_OTHER, LDR_APP_HI - 1u};
         uint32_t k;
         for (k = 0; k < 2u; k++) {
             set_fl_size(logical, SZ[k]);
             erases = 0;
             rc = ldr_session();
             bad += check(k ? "flash.bin a byte short of the app area: refused, nothing erased" :
-                             "another board's size (0x9D000): refused (-14), nothing erased",
-                         rc == -14 && erases == 0 && !memcmp(nor + 0x4000, old + ofo + 0x4000, 0x93000 - 0x4000));
+                             "another board's size (" T_FL_OTHER_NAME "): refused (-14), nothing erased",
+                         rc == -14 && erases == 0 && !memcmp(nor + 0x4000, old + ofo + 0x4000, T_APP_HI - 0x4000));
         }
         set_fl_size(logical, LDR_APP_HI);           /* back: this board's size, the install below takes it */
         requests = 0;
@@ -208,7 +271,7 @@ int main(int argc, char **argv)
         erases = 0;
         rc = ldr_session();
         bad += check("damaged package (flash.bin CRC) refused, nothing erased", rc == -12 && erases == 0 &&
-                     !memcmp(nor + 0x4000, old + ofo + 0x4000, 0x93000 - 0x4000) && nor[0xE4F06] == 0x41);
+                     !memcmp(nor + 0x4000, old + ofo + 0x4000, T_APP_HI - 0x4000) && nor[T_REC + 6u] == 0x41);
         logical[at] ^= 0x01;
         requests = 0;
     }
@@ -216,15 +279,15 @@ int main(int argc, char **argv)
     flip_addr = nfo + 0x20000u; flip_on = 2; flip_seen = 0;
     rc = ldr_session();
     printf("  rc %d, %u requests, %u sector erases\n", rc, requests, erases);
-    bad += check("install completes (flash.bin exactly the app area, 0x93000)", rc == 0);
+    bad += check("install completes (flash.bin exactly the app area, " T_FL_NAME ")", rc == 0);
     bad += check("a sector changed in transfer after the check is read again", flip_seen == 3);
     flip_addr = 0xFFFFFFFFu;
-    bad += check("app area == the new package's flash.bin", !memcmp(nor + 0x4000, logical + nfo + 0x4000, 0x93000 - 0x4000));
+    bad += check("app area == the new package's flash.bin", !memcmp(nor + 0x4000, logical + nfo + 0x4000, T_APP_HI - 0x4000));
     bad += check("flash head [0, 0x4000) untouched", !memcmp(nor, head, sizeof head));
     bad += check("finish asked (0xF0000000)", f0_asked >= 1);
-    bad += check("update records cleared (RAM + flash 0xE4F00, the stock firmware's 0xE8F00)",
-                 record_cleared && nor[0xE4F06] == 0xFF && nor[0xE8F06] == 0xFF);
-    bad += check("user data in Felucca's store that looks like a record is kept", !memcmp(nor + 0xA0000, user, sizeof user));
+    bad += check("update records cleared (RAM + flash: ours, the other one)",
+                 record_cleared && nor[T_REC + 6u] == 0xFF && nor[T_REC2 + 6u] == 0xFF);
+    bad += check("user sample data that looks like a record is kept", !memcmp(nor + T_USER, user, sizeof user));
     bad += check("no write outside the allowed windows", bad_range == 0);
     /* same package again: nothing to erase */
     erases = 0; requests = 0;
@@ -234,12 +297,13 @@ int main(int argc, char **argv)
     {
         uint8_t save = logical[nfo + 0x4000 + 5];
         logical[nfo + 0x4000 + 5] ^= 0x5A;           /* app area head no longer decrypts */
-        memcpy(nor, old + ofo, 0x93000);
+        memcpy(nor, old + ofo, T_APP_HI);
         erases = 0;
         rc = ldr_session();
         bad += check("foreign key / damaged app head refused, nothing erased", rc == -6 && erases == 0);
         logical[nfo + 0x4000 + 5] = save;
     }
+    bad += check("protected ranges untouched (SMK: BTIF, USRTRIM, USR, key_mac)", protect_ok());
     printf("%s\n", bad ? "LOADER TEST FAILED" : "loader test passed");
     return bad != 0;
 }

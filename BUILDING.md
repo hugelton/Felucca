@@ -74,13 +74,22 @@ Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`, `c
 | `FELUCCA_UAC_48K` | 1 | `0`: the USB audio input at 44.1 kHz only, as up to 1.0.5.2 (`firmware/src/usb.c`) |
 | `FELUCCA_UAC_AS_FIRST` | 1 | the audio control header lists the audio streaming interface before the MIDI one, so the USB audio driver of older macOS (up to 15) finds it; `0`: 1.0 to 1.5's order, byte for byte (`firmware/src/usb.c`) |
 | `FELUCCA_CPU2` | 1 | the second core is built in (MENU > SYSTEM > 2ND CORE, OFF by default); `0`: none of it, 1.6's one-core code and RAM (`firmware/hal/fm1_cpu1.h`, `firmware/src/fx.c`) |
-| `FELUCCA_UART` | 1 | TRS MIDI IN |
+| `FELUCCA_UART` | 1 (SMK-37 Pro: 0) | TRS MIDI IN; must stay 0 on the SMK-37 Pro (PH8 is a key row there) |
 | `FELUCCA_SLICE` | 1 | the SLICE engine |
 | `FELUCCA_ICONS` | 1 | parameter icons on the knob cards |
 | `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion |
 
 `FELUCCA_USB_LAYOUT` (`0` to `3`, default `0`) picks other USB descriptor layouts for testing; see
 `firmware/src/usb.c`.
+
+Target board: `BOARD=smk37 ./build.sh` (or `./build.sh --board smk37`) builds Felucca for the
+SMK-37 (beta): `-DBOARD_SMK37=1` for the app and the update loader, identity `SMK-37 Pro_900` (release
+`SMK-37 Pro_9XY`), the SMK flash layout (PRCT 0x9D000, the stock region table with USRTRIM / USRFLASH) and the
+package `build/felucca-smk37.fwsc`. `MODEL=elite` or `MODEL=mke` builds the same firmware under the SMK-37 Elite's or
+the MKE-P37's model name (`build/felucca-smk37-elite.fwsc`, `build/felucca-smk37-mke.fwsc`), so the stock updater still
+takes that unit's factory package. Controls: [SMK37.md](SMK37.md). The
+intermediate files (`build/felucca.bin`, `build/loader/ota.bin`, `build/felucca.dis`) are shared: build the FM-1
+again before `tests/run_tests.sh`. The default stays the FM-1, byte for byte.
 
 ## Samples
 

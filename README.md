@@ -16,6 +16,7 @@ Want to look around first? [Try it in your browser](https://hugelton.github.io/F
   [Engines](https://github.com/hugelton/Felucca/wiki/Engines) · [Release notes](https://github.com/hugelton/Felucca/wiki/Release-Notes) ·
   [Troubleshooting](https://github.com/hugelton/Felucca/wiki/Troubleshooting)
 - Build: [BUILDING.md](BUILDING.md); clone with the engines' submodule: `git clone --recurse-submodules https://github.com/hugelton/Felucca.git`
+- SMK-37 (beta): [SMK37.md](SMK37.md)
 
 <a href="https://hugelton.itch.io/felucca"><img src="https://static.itch.io/images/badge-color.svg" alt="Available on itch.io" width="74"></a>
 

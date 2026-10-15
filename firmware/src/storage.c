@@ -61,6 +61,113 @@ static uint32_t st_crc32_add(uint32_t c, const void *p, uint32_t n)   /* zlib CR
 }
 static uint32_t st_crc32(const void *p, uint32_t n) { return ~st_crc32_add(0xFFFFFFFFu, p, n); }
 
+#if BOARD_SMK37
+/* SMK-37 Pro: every object in FL_DATA 0x9D000..0xBAFFF (the stock VM),
+ * A/B neighbours: projects 0x9D000..0xA4FFF, user preset banks 0xA5000..0xA8FFF, autosave 0xA9000 /
+ * 0xAA000, the user presets' FM6 patches (OBJ_UPFM6, the pair of the retired OBJ_FM6BANK) 0xAB000 / 0xAC000,
+ * settings 0xAD000 / 0xAE000; the store owner tag 0xAF000 (st_owner_check), the FM6 voice bank 0xB0000
+ * (fm6_vbank.c FVB_HOME); 0xB1000..0xBAFFF spare. Never near BTIF / USRTRIM (0xC0000..0xC1FFF) or key_mac
+ * (0xFF000). */
+#define ST_SMK_BASE 0x9D000u
+#define ST_SMK_PAIRS 9u
+#define ST_SMK_SECTORS (2u * ST_SMK_PAIRS)
+#define ST_SMK_VBANK 0xB0000u                  /* the FM6 voice bank (fm6_vbank.c), one sector */
+_Static_assert(OBJ_COUNT == 10u && OBJ_UPFM6 == OBJ_FM6BANK + 1u, "SMK store: a new object needs a place");
+_Static_assert(ST_SMK_BASE + ST_SMK_SECTORS * ST_SECTOR == 0xAF000u, "SMK store: the objects end at the owner tag");
+_Static_assert(ST_SMK_VBANK >= 0xAF000u + ST_SECTOR && ST_SMK_VBANK + ST_SECTOR <= 0xBB000u, "SMK store: past FL_DATA");
+static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
+{
+    static const uint8_t ORDER[OBJ_COUNT] = {
+        [OBJ_PROJECT0] = 0, [OBJ_PROJECT0 + 1] = 1, [OBJ_PROJECT0 + 2] = 2, [OBJ_PROJECT0 + 3] = 3,
+        [OBJ_UPRESET0] = 4, [OBJ_UPRESET0 + 1] = 5, [OBJ_AUTOSAVE] = 6, [OBJ_FM6BANK] = 7, [OBJ_UPFM6] = 7,
+        [OBJ_SETTINGS] = 8};
+    return ST_SMK_BASE + (ORDER[obj % OBJ_COUNT] * 2u + (copy & 1u)) * ST_SECTOR;
+}
+
+/* The owner of the store. The store area is the stock firmware's VM, so after an install it may hold the stock
+ * firmware's (or any other firmware's) data, which Felucca must never parse as its own. The sector after the objects
+ * (0xAF000) holds the tag "SMK37DATAFELUCCA". Tagged: load as ever. Anything else (another tag, or none): clear the
+ * objects (0x9D000..0xAEFFF) and the FM6 voice bank (0xB0000), then write the tag. FELUCCA_DATA_UNTAGGED_OK 1 would
+ * keep a store with an erased tag (0: the SMK build never wrote untagged data). User samples (FL_SMP) validate
+ * themselves. Calibration, BT pairing and key_mac are outside FL_DATA: never touched. Called first in persist_boot
+ * (project.c), before any store read. */
+#ifndef FELUCCA_DATA_UNTAGGED_OK
+#define FELUCCA_DATA_UNTAGGED_OK 0
+#endif
+#define ST_OWNER_OFF 0xAF000u
+_Static_assert(ST_OWNER_OFF == ST_SMK_BASE + ST_SMK_SECTORS * ST_SECTOR && ST_OWNER_OFF != ST_SMK_VBANK,
+               "SMK store owner: the sector after the objects");
+/* The stock firmware's mapping in USRFLASH (global settings at 0xC2000, magic A3 3A; 8 presets from 0xC3000 every
+ * 0x5000, 0x29E3 bytes each, the rest erased; the end marker "usrdata\0" at 0xEAFF8, FL_STOCKTAG): the stock firmware
+ * trusts the area while the marker is there and never rebuilds it, so after a return to stock the user samples
+ * would be its key, knob and fader mapping (every key one note). So: an intact stock mapping is kept (it reads as
+ * empty slots), and the marker is released (its sector erased: the stock firmware rebuilds its factory mapping at
+ * its next start) before the first erase in USRFLASH (storage_hw.c st_erase, editor.c) and at boot when it stands
+ * over anything else (st_owner_check: ours, an older build's, another firmware's). */
+static int st_stock_tagged(void)
+{
+    static const uint8_t TAG[8] = {'u', 's', 'r', 'd', 'a', 't', 'a', 0};
+    uint8_t t[8];
+    uint32_t i;
+    if (st_read(FL_STOCKTAG_OFF, t, 8))
+        return 0;
+    for (i = 0; i < 8u; i++)
+        if (t[i] != TAG[i])
+            return 0;
+    return 1;
+}
+static int st_stock_intact(void)                /* the marker over the stock layout */
+{
+    uint8_t b[8];
+    uint32_t n, k, i, ff;
+    if (!st_stock_tagged() || st_read(FL_SMP_LO, b, 2) || b[0] != 0xA3u || b[1] != 0x3Au)
+        return 0;
+    for (n = 0; n < 8u; n++)                    /* each preset: its head written, its last two sectors erased */
+        for (k = 0; k < 3u; k++) {
+            if (st_read(FL_SMP_LO + 0x1000u + n * 0x5000u + (k ? 0x2000u + k * 0x1000u : 0u), b, 8))
+                return 0;
+            for (ff = 1, i = 0; i < 8u; i++)
+                ff &= b[i] == 0xFFu;
+            if (ff != (k != 0u))
+                return 0;
+        }
+    return 1;
+}
+static void st_stock_release(void)              /* erase the marker's sector, once: later calls find no marker */
+{
+    if (st_stock_tagged())
+        st_erase(FL_STOCKTAG_LO);
+}
+static inline int st_in_usrflash(uint32_t off) { return off >= FL_SMP_LO && off < FL_SMP_HI; }
+static uint8_t st_owner_cleared;                /* (the UI may say so) */
+static void st_owner_check(void)
+{
+    static const char FAM[] = "FELUCCA";            /* the tag: "SMK37DATA" + this, zero-padded to 16 B */
+    uint8_t tag[16], want[16];
+    uint32_t i, erased = 1, ours = 1, s;
+    for (i = 0; i < 16u; i++)
+        want[i] = i < 9u ? (uint8_t)"SMK37DATA"[i] : i - 9u < sizeof FAM - 1u ? (uint8_t)FAM[i - 9u] : 0u;
+    if (!st_stock_intact())
+        st_stock_release();                     /* the marker over anything but the stock mapping: let it rebuild */
+    if (st_read(ST_OWNER_OFF, tag, 16))
+        return;
+    for (i = 0; i < 16u; i++) {
+        erased &= tag[i] == 0xFFu;
+        ours &= tag[i] == want[i];
+    }
+    if (ours)
+        return;
+    if (!erased || !FELUCCA_DATA_UNTAGGED_OK) {     /* not ours (or untagged data): clear it */
+        for (s = 0; s < ST_SMK_SECTORS; s++)
+            st_erase(ST_SMK_BASE + s * ST_SECTOR);
+        st_erase(ST_SMK_VBANK);
+        st_owner_cleared = 1;
+    }
+    st_erase(ST_OWNER_OFF);
+    st_prog(ST_OWNER_OFF, want, 16);
+}
+#else
+static void st_owner_check(void) {}
 static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy A (0) / B (1) */
 {
     if (obj == OBJ_SETTINGS)
@@ -73,6 +180,7 @@ static uint32_t st_sector(uint32_t obj, uint32_t copy)  /* flash offset of copy 
         return 0xDC000u + (obj - OBJ_UPRESET0) * 2u * ST_SECTOR + copy * ST_SECTOR;
     return 0x97000u + (obj - OBJ_PROJECT0) * 2u * ST_SECTOR + copy * ST_SECTOR;
 }
+#endif
 
 static uint8_t st_buf[ST_PAYLOAD_MAX] __attribute__((aligned(4), section(".pool")));   /* (main loop only) */
 

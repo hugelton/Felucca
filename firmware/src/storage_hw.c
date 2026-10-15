@@ -25,15 +25,28 @@ static void audio_silence(void)                 /* IRQs off: the DMA would loop 
     for (i = 0; i < sizeof abuf / sizeof abuf[0]; i++)
         abuf[i] = 0;
 }
+#if BOARD_SMK37
+static void st_stock_release(void);             /* storage.c: the stock mapping's end marker */
+static int st_in_usrflash(uint32_t off);
+#endif
 static int st_erase(uint32_t off)
 {
     uint32_t took, f;
     int rc;
+#if BOARD_SMK37
+    if (!FL_STORE_OK(off, 0x1000u) && !FL_STOCKTAG_OK(off, 0x1000u))
+        return -8;
+    if (st_in_usrflash(off))
+        st_stock_release();                     /* before the first erase in USRFLASH: see storage.c */
+#else
     if (!FL_STORE_OK(off, 0x1000u))
         return -8;
+#endif
     f = irq_save();
     audio_silence();
+#if !BOARD_SMK37                                /* (the SMK-37's LEDs are latched, no scan) */
     fm1__led_lines(0);                          /* (#236) the erase stops the LED scan for ~17 ms (the IRQs are off and its code */
+#endif
     rc = FL_FAR(fl_erase4k_ram)(off, &took);    /* is in the flash): one column would stay lit at full duty and the rest dark, a */
     irq_restore(f);                             /* flash of the whole panel. Dark rows: the panel just drops out; the tick lights */
     return rc;                                  /* the rows again at its next pass */
