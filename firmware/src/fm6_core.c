@@ -264,7 +264,7 @@ static int32_t fm6_lfo_sample(fm6_lfo_t *l)   /* 0..1, Q24; once a block */
     case 3:                                       /* square */
         return (int32_t)(((~l->phase) >> 7) & (1u << 24));
     case 4:                                       /* sine */
-        return (1 << 23) + (fm6_sin((int32_t)(l->phase >> 8)) << 8);
+        return (1 << 23) + fm6_sin((int32_t)(l->phase >> 8)) * 256;
     case 5:                                       /* sample and hold */
         if (l->phase < l->delta)
             l->rnd = (uint8_t)((l->rnd * 179 + 17) & 0xff);
@@ -338,9 +338,9 @@ static __attribute__((noinline)) void fm6_op_run(int32_t *out, const int32_t *in
     int32_t dg = (g2 - g1 + (FM6_N >> 1)) >> FM6_LG_N, g = g1;
     uint32_t i;
     if (in && add)
-        FM6_OP_LOOP(phase + in[i], +=)
+        FM6_OP_LOOP((int32_t)((uint32_t)phase + (uint32_t)in[i]), +=)
     else if (in)
-        FM6_OP_LOOP(phase + in[i], =)
+        FM6_OP_LOOP((int32_t)((uint32_t)phase + (uint32_t)in[i]), =)
     else if (add)
         FM6_OP_LOOP(phase, +=)
     else
@@ -357,7 +357,7 @@ static __attribute__((noinline)) void fm6_op_fb(int32_t *out, int32_t phase, int
         int32_t s = (y0 + y) >> (shift + 1);
         g += dg;
         y0 = y;
-        y = (int32_t)(((int64_t)fm6_sin(phase + s) * g) >> 15);
+        y = (int32_t)(((int64_t)fm6_sin((int32_t)((uint32_t)phase + (uint32_t)s)) * g) >> 15);
         out[i] = add ? out[i] + y : y;
         phase = (int32_t)((uint32_t)phase + (uint32_t)freq);
     }
@@ -435,7 +435,7 @@ static const uint32_t FM6_AMSENS[4] = {0, 4342338, 7171437, 16777216};
 static int32_t fm6_scale_vel(int32_t vel, int32_t sens)
 {
     int32_t v = FM6_VELDATA[(vel < 0 ? 0 : vel > 127 ? 127 : vel) >> 1] - 239;
-    return ((sens * v + 7) >> 3) << 4;
+    return ((sens * v + 7) >> 3) * 16;
 }
 static int32_t fm6_scale_rate(int32_t note, int32_t sens)
 {

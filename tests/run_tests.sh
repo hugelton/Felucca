@@ -202,6 +202,12 @@ fail=0
 run() { echo "== $1"; shift; "$@" || fail=1; }
 
 $CC -o "$OUT/storage_test" tests/storage_test.c
+$CC -Ibuild/gen -Ifirmware/src -o "$OUT/signed_audio_scaling_test" tests/signed_audio_scaling_test.c -lm
+run "DSP signed arithmetic: fixed DC/lowcut/FM6 vectors and phase wrap" "$OUT/signed_audio_scaling_test"
+
+$CC -Ibuild/gen -Ifirmware/src -o "$OUT/phys_signed_test" tests/phys_signed_test.c -lm
+run "PHYS: signed output and frozen baseline render" "$OUT/phys_signed_test"
+
 run "flash storage (A/B, torn writes)" "$OUT/storage_test"
 
 $CC -o "$OUT/upreset_test" tests/upreset_test.c
@@ -472,6 +478,12 @@ else
     A="$OUT/asan"
     SCC="${CC%% *} $SAN -Ibuild/gen -Ifirmware/src"
     export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+    # This regression uses strict ASan/UBSan, without the broad DSP exclusions.
+    STRICT_CC="${CC%% *} -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -w -Ibuild/gen -Ifirmware/src"
+    $STRICT_CC -o "$A/signed_audio_scaling_test_strict" tests/signed_audio_scaling_test.c -lm
+    run "Strict ASan/UBSan (no exclusions): signed_audio_scaling_test" "$A/signed_audio_scaling_test_strict"
+    $STRICT_CC -o "$A/phys_signed_test_strict" tests/phys_signed_test.c -lm
+    run "Strict ASan/UBSan (no exclusions): phys_signed_test" "$A/phys_signed_test_strict"
     $SCC -o "$A/ldr_test" tests/ldr_test.c
     run "ASan/UBSan: update loader (other app -> this build)" "$A/ldr_test" "$OUT/old.fwsc" build/felucca.fwsc
     $SCC -DOWN_PKG=1 -o "$A/ota_test" tests/ota_test.c
