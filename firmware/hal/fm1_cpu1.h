@@ -11,7 +11,8 @@
  * set, then bit 3 cleared.
  *
  * Work: one job at a time, a function and an argument; core 0 hands it over (mb.job) and waits
- * for it (mb.done), single writer each way, csync around each (the cores share the caches).
+ * for it (mb.done), single writer each way. CSYNC releases before publication and acquires
+ * after observing it, including boot and failure markers (the existing HAL contract).
  *
  * Units that cannot run it (fm1-x0x#10, measured by Jangada, github.com/zednaked/jangada): on some
  * FM-1s core 1 reads words that are not in RAM (0x00200000 where core 0 reads 0), idle now and then,
@@ -70,7 +71,9 @@ void __attribute__((section(".c1_text"), noreturn, used)) fm1_c1_main(void)
     *(volatile uint32_t *)0x1EEF2E4u = lo;
     *(volatile uint32_t *)0x1EEF2D0u = (*(volatile uint32_t *)0x1EEF2D0u & ~((1u << 2) | (0x1Fu << 16))) | (1u << 3);
     fm1_c1_trace = 0xC1000002;
+    FM1_C1_SYNC();                              /* acquire core 0's boot state before announcing readiness */
     done = fm1_c1_mb.done;
+    FM1_C1_SYNC();                              /* release the guards/trace and initial done before alive */
     fm1_c1_mb.alive = 1;
     FM1_C1_SYNC();
     for (;;) {
@@ -142,6 +145,7 @@ static int fm1_cpu1_start(void)
         fm1_cpu1_hold();
         return -1;
     }
+    FM1_C1_SYNC();                              /* acquire the worker's published boot state */
     fm1_c1_on = 1;
     return 0;
 }
@@ -170,6 +174,7 @@ static inline int fm1_cpu1_wait(void)
     for (;;) {
         FM1_C1_SYNC();
         if (fm1_c1_mb.bad) {                    /* a unit that cannot run it: one core */
+            FM1_C1_SYNC();                      /* acquire its failure details before holding it */
             fm1_cpu1_hold();
             fm1_c1_gave_up = 1;
             return -1;
@@ -177,6 +182,7 @@ static inline int fm1_cpu1_wait(void)
         if (fm1_c1_mb.done == fm1_c1_mb.job) {
             if (FM1_C1_T4 - t0 > fm1_c1_wait_max)
                 fm1_c1_wait_max = FM1_C1_T4 - t0;
+            FM1_C1_SYNC();                      /* acquire its finished payload before the caller uses it */
             return 0;
         }
         if (FM1_C1_T4 - t0 > 24000u * 4u) {     /* 4 ms (as Jangada): past any block's work, a half is 2.9 ms

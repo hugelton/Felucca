@@ -201,6 +201,8 @@ CC="${CC:-cc} -O1 -Wall -Wno-unused-function"
 fail=0
 run() { echo "== $1"; shift; "$@" || fail=1; }
 
+run "second core HAL: mailbox publication/acquisition, boot, failures and fence mutations" python3 tests/cpu1_protocol_test.py
+
 $CC -o "$OUT/storage_test" tests/storage_test.c
 run "flash storage (A/B, torn writes)" "$OUT/storage_test"
 
