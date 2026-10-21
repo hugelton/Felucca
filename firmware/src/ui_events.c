@@ -57,7 +57,7 @@ static int ev_id_ok(const track_t *t, uint32_t id)
     const param_desc_t *d;
     if (ev_sid(id))
         return 1;
-    if (id >= P_COUNT || !motion_param(id) || id == P_ED_FX || (id >= P_FM1_ATK && id <= P_FM4_LEVEL))
+    if (id >= P_COUNT || !motion_param(id) || id == P_DRNG || (id >= P_FM1_ATK && id <= P_FM4_LEVEL))
         return 0;
     if (id >= P_LN0 && id <= P_LN7)
         return drum_track(t);

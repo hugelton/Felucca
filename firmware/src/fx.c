@@ -554,7 +554,78 @@ static __attribute__((noinline)) void rev_switch(const int32_t *rev_in, int32_t 
     fx.rtype = (uint8_t)rt;
 }
 
-/* process the three buses for one block; sends in, wet stereo-equal out */
+/* CHORUS TYPE I, II, I+II (G_CTYPE 1..3, after 1.6.1): the Juno-106's MN3009 BBD chorus, after fm-106 (fm106_chorus.h,
+ * PatttF, GPL-3.0-only) and Ultramaster KR-106 (Kayrock Screenprinting, GPL-3.0). One line (the send), two taps that a
+ * triangle moves in antiphase around 3.5 ms: I 0.514 Hz +-2.1 ms, II 0.843 Hz +-1.7 ms, I+II 7.86 Hz +-0.24 ms (at
+ * DEPTH 60; 0 none, 127 twice; RATE is not theirs), read between samples (Hermite), each through the BBD's 9.7 kHz
+ * reconstruction low-pass. Their sum goes to the wet bus as the other buses' do, their difference to rev_side (+ left,
+ * - right, with HALL's when it runs). STD (0) is the chorus of fx_buses, bit for bit: it reads a silent send while a BBD
+ * runs (its tail rings out), and back on STD the BBD's last block fades out and its line is cleared */
+#define BBD_LEN 1024u
+static int16_t bbd_buf[BBD_LEN] __attribute__((section(".pool")));
+static struct {
+    uint32_t w, ph;                      /* the line's write index, the LFO */
+    int32_t f[4];                        /* the two taps' low-passes */
+    uint8_t type;                        /* the BBD running (G_CTYPE), 0 = none */
+} bbd __attribute__((section(".pool")));
+static const int32_t BBD_SILENT[CTL];   /* STD's send while a BBD runs */
+
+static inline int32_t bbd_tap(uint32_t w, int32_t d16)   /* the line d16 (16.16 samples) before w, 4-point Hermite */
+{
+    uint32_t r1 = w - 1u - (uint32_t)(d16 >> 16);
+    int32_t f = (d16 >> 1) & 0x7FFF, y0 = bbd_buf[(r1 + 1u) & (BBD_LEN - 1u)], y1 = bbd_buf[r1 & (BBD_LEN - 1u)];
+    int32_t y2 = bbd_buf[(r1 - 1u) & (BBD_LEN - 1u)], y3 = bbd_buf[(r1 - 2u) & (BBD_LEN - 1u)];
+    int32_t c1 = (y2 - y0) >> 1, c2 = y0 - y1 + (y2 - y1) - ((y1 - (y2 << 1) + y3) >> 1);
+    int32_t c3 = ((y3 - y0) >> 1) + y1 - y2 + ((y1 - y2) >> 1);
+    int64_t a = (((int64_t)c3 * f) >> 15) + c2;
+    a = ((a * f) >> 15) + c1;
+    return (int32_t)(((a * f) >> 15) + y1);
+}
+
+static inline int32_t bbd_lp(int32_t *s, int32_t x)       /* 2nd-order Butterworth low-pass, 9.66 kHz (TPT SVF) */
+{
+    int32_t v3 = x - s[1], v1 = ((11534 * s[0]) >> 15) + ((9527 * v3) >> 15), v2 = s[1] + ((27066 * v1) >> 15);
+    s[0] = (v1 << 1) - s[0];
+    s[1] = (v2 << 1) - s[1];
+    return v2;
+}
+
+static __attribute__((noinline)) void cho_bbd(const int32_t *in, int32_t *wet, uint32_t n, uint32_t ct)
+{
+    static const uint32_t INC[3] = {50098u, 82068u, 765109u};   /* the LFO's step a sample: 0.514 0.843 7.86 Hz */
+    static const uint8_t DEP[3] = {94, 75, 10};                 /* its swing, samples (at DEPTH 60) */
+    uint32_t i, w = bbd.w, ph = bbd.ph, m = (ct ? ct : bbd.type) - 1u, inc = INC[m], side = hl.side;
+    int32_t dep = DEP[m] * song.g[G_CDEPTH] / 60, g = 65536, dg = ct ? 0 : 65536 / (int32_t)n;
+    for (i = 0; i < n; i++) {
+        int32_t tri, l, r;
+        bbd_buf[w & (BBD_LEN - 1u)] = (int16_t)(ct ? clamp(in[i] >> 1, -32768, 32767) : 0);
+        ph += inc;
+        tri = (int32_t)(ph >> 16) - 32768;
+        tri = ((tri < 0 ? -tri : tri) - 16384) << 1;
+        l = bbd_lp(&bbd.f[0], bbd_tap(w, (154 << 16) + tri * dep));
+        r = bbd_lp(&bbd.f[2], bbd_tap(w, (154 << 16) - tri * dep));
+        if (dg) {                                       /* back on STD: this last block fades out */
+            l = mulq16(l, (uint32_t)g);
+            r = mulq16(r, (uint32_t)g);
+            g -= dg;
+        }
+        wet[i] += l + r;                                /* (the taps << 1, as the classic chorus's: their mean) */
+        rev_side[i] = (side ? rev_side[i] : 0) + l - r;
+        w++;
+    }
+    hl.side = 1;
+    bbd.w = w;
+    bbd.ph = ph;
+    bbd.type = (uint8_t)ct;
+    if (!ct) {                                          /* silent from here: the line and the low-passes cleared */
+        for (i = 0; i < BBD_LEN; i++)
+            bbd_buf[i] = 0;
+        for (i = 0; i < 4u; i++)
+            bbd.f[i] = 0;
+    }
+}
+
+/* process the three buses for one block; sends in, wet stereo-equal out (and BBD's stereo difference: cho_bbd) */
 static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t *rev_in, int32_t *wet,
                      uint32_t n)
 {
@@ -563,13 +634,15 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
     int32_t dmix = song.g[G_DMIX] * 258;
     int32_t cdepth = song.g[G_CDEPTH] * 6, rt;
     uint32_t cinc = LFO_INC[song.g[G_CRATE] & 127] / CTL;
+    uint32_t ct = (uint32_t)song.g[G_CTYPE] <= 3u ? (uint32_t)song.g[G_CTYPE] : 0u;   /* CHORUS TYPE (cho_bbd) */
+    const int32_t *cin = ct ? BBD_SILENT : cho_in;     /* (a BBD runs: the STD chorus rings out) */
     if (pf.ew1 && fb < THR_FB)
         fb += mulq16(THR_FB - fb, (uint32_t)pf.ew1 << 1);   /* ECHO THROW (perform.c): more feedback while held, 0.7
                                                              * at most (the loop's gain below 1: it never runs away) */
     for (i = 0; i < n; i++) {
         int32_t y = 0, x, r;
         /* chorus: modulated short delay, 5..15 ms */
-        cho_buf[fx.cho_w & (CHO_LEN - 1u)] = (int16_t)clamp(cho_in[i] >> 1, -32768, 32767);
+        cho_buf[fx.cho_w & (CHO_LEN - 1u)] = (int16_t)clamp(cin[i] >> 1, -32768, 32767);
         fx.cho_ph += cinc;
         r = (400 << 8) + ((osc_sine(fx.cho_ph) + 32768) * cdepth >> 8);   /* Q8 delay: read between samples */
         {
@@ -599,9 +672,11 @@ static void fx_buses(const int32_t *cho_in, const int32_t *dly_in, const int32_t
         rev_spring(rev_in, wet, n);
     else
         rev_room(rev_in, wet, n);
+    if (ct || bbd.type)
+        cho_bbd(cho_in, wet, n, ct);                    /* CHORUS TYPE I, II, I+II (after the reverb: rev_side) */
 }
 
-/* after the buses: HALL's stereo difference to the left and from the right of the dry mix (the wet bus adds the
+/* after the buses: HALL's (and the BBD chorus's) stereo difference to the left and from the right of the dry mix (the wet bus adds the
  * same to both) */
 static __attribute__((noinline)) void rev_side_mix(int32_t *l, int32_t *r, uint32_t n)
 {
@@ -865,11 +940,7 @@ static __attribute__((noinline)) void mix_spread(track_t *t, int32_t *b, uint32_
 #if FELUCCA_CPU2
 static uint16_t part_cost[NTRK];                        /* the last block's, per part */
 static const uint16_t ENG_VCOST[NENGINES] = {163, FELUCCA_FM4 ? 181 : 0, 162, 67, 70, 174, 144, 143, 189, 309, 113, 134,
-                                             181,
-#if FELUCCA_SLICE
-                                             129
-#endif
-};
+                                             181, FELUCCA_SLICE ? 129 : 0, 290};   /* (.., SLICE, DCO) */
 #endif
 
 /* one synth part into the dry mix and the sends of sm (mx[0]; mx[1] on the second core); a part with no voice sounding costs

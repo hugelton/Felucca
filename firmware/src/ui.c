@@ -429,6 +429,8 @@ static int page_visible(uint32_t i)
         return TSEL->eng_req % NENGINES == ENGI_DRUM;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): ANALOG's */
         return ENGINES[TSEL->eng_req % NENGINES] == &ENG_ANALOG;
+    if (PAGES[i].id[0] == P_DRNG)                     /* RANGE: DCO's (eng_dco.c) */
+        return TSEL->eng_req % NENGINES == ENGI_DCO;
     if (PAGES[i].graph >= GR_FMOP && PAGES[i].graph <= GR_FMENV)
         return TSEL->eng_req % NENGINES == ENGI_FM6;
 #if FELUCCA_SLICE
@@ -1377,6 +1379,7 @@ static void apply_preset_to(track_t *t, uint32_t pi)
             t->p[P_DIST + i] = (int16_t)(pr->fx[i] ? pr->fx[i] - 1 : FX_DEF[i]);
     }
     fm6_track_loaded(t);                              /* FM6: the preset's patch (its SLOT) */
+    dco_track_loaded(t, pi);                          /* DCO: the preset's LFO and RANGE */
     load_end(t);
 }
 
@@ -1392,6 +1395,9 @@ static void set_engine_of(track_t *t, uint32_t ei)
         return;
     }
 #endif
+    if (!eng_ok(ei % NENGINES))                       /* a slot this build reserves (FELUCCA_SLICE=0's 13, FELUCCA_FM4's
+                                                       * 14): no engine (the editor's SET of G_ENGSEL) */
+        return;
     load_begin(t, UNDO_SOUND);
     fm1_irq_off();
     t->eng_req = (uint8_t)(ei % NENGINES);

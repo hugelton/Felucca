@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Shared PER4 layout: each feature updates only its own fields, preserving
+/* Shared PER5 layout: each feature updates only its own fields, preserving
  * the other feature's saved preferences when either is built independently.
- * PER1/PER2 are upstream; PER3 added bold; PER4 added favorites.
+ * PER1/PER2 are upstream; PER3 added bold; PER4 added favorites; PER5 the favorites of engines 14 and 15 (DCO).
  * palette: UI_PAL_TAG + index; an old id (below 20, earlier firmware) is migrated on import.
  * bold: no longer used (one font weight); kept as it was saved, unless it holds the HOLD setting (panel.c).
  * zoom: no longer used (the large readout); kept as it was saved, unless it holds the LEDS setting (panel.c).
@@ -23,18 +23,23 @@ typedef struct {
     uint32_t magic, palette, lowcut, zoom;
     panel_t panel;
     uint32_t bold;
-    struct { uint8_t factory[16][32]; uint32_t user, filter; } favorites;
+    struct { uint8_t factory[16][32]; uint32_t user, filter; uint8_t ext[2][32]; } favorites;   /* (favorites.c) */
 } persist_t;
-#define PERSIST_MAGIC 0x50455234u
+/* PER5 (after 1.6.1): the favourites of engines 14 and 15 (favorites.ext) appended; PER4 is PER5 without them (firmware up
+ * to 1.6.1 reads PER4 only: on such a firmware a PER5 setting is invalid, the defaults) */
+#define PERSIST_MAGIC 0x50455235u
+#define PERSIST_MAGIC_V4 0x50455234u
+#define PERSIST_V4_LEN (sizeof(persist_t) - sizeof(((persist_t *)0)->favorites.ext))
 
 /* Normalize in place; 1 = current, 2 = migrated, 0 = invalid. */
 static int settings_import(persist_t *p, int n)
 {
     int current = n == (int)sizeof *p && p->magic == PERSIST_MAGIC;
+    int old4 = n == (int)PERSIST_V4_LEN && p->magic == PERSIST_MAGIC_V4;
     int old3 = n == (int)(sizeof *p - sizeof p->favorites) && p->magic == 0x50455233u;
     int old2 = n == (int)(sizeof *p - sizeof p->favorites - sizeof p->bold) && p->magic == 0x50455232u;
     int old1 = n == (int)(8u + sizeof(panel_t)) && p->magic == 0x50455231u;
-    if (!(current || old3 || old2 || old1)) return 0;
+    if (!(current || old4 || old3 || old2 || old1)) return 0;
     if (old1) {
         panel_t old;
         memcpy(&old, (uint8_t *)p + 8, sizeof old);
@@ -42,7 +47,8 @@ static int settings_import(persist_t *p, int n)
         p->lowcut = p->zoom = 0;
     }
     if (old1 || old2) p->bold = 0;
-    if (!current) memset(&p->favorites, 0, sizeof p->favorites);
+    if (old4) memset(p->favorites.ext, 0, sizeof p->favorites.ext);   /* (none starred: every other byte as saved) */
+    else if (!current) memset(&p->favorites, 0, sizeof p->favorites);
     if (p->favorites.factory[15][29] > 1u)        /* STYLE (ui.c ui_style): 2, the retired PIXEL = LINE; unknown = FLAT */
         p->favorites.factory[15][29] = p->favorites.factory[15][29] == 2u ? 1u : 0u;
     {   /* CLICK, CLICK LEVEL, COUNT-IN (ui.c ui_rec_prefs): two bits each, 3 is no value: the default (0) */

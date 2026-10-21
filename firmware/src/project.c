@@ -290,6 +290,7 @@ static void proj_drums_to_part(project_t *q)
     d->preset = PROJ_DEF_KEEP;
     d->p[P_LEVEL] = (int16_t)clamp(q->g[G_DRLVL], 0, 127);   /* the drum part's level and reverb send */
     d->p[P_REV] = (int16_t)clamp(q->g[G_DRREV], 0, 127);
+    q->g[G_CTYPE] = 0;                          /* (G_DRLVL's id: CHORUS TYPE now; CLASSIC, as it played) */
     q->parts = NPART;
     q->sum = proj_sum(q);
 }
@@ -485,13 +486,13 @@ static void proj_fm6_init(project_t *q)
 }
 static int proj_import_old(project_t *q, const void *b, int n);
 static int proj_import_any(project_t *q, const void *b, int n);
-/* every track's engine one this firmware has (DIGITAL, 1, is one: it converts): a project of another number
- * is not one (it never was: no engine number past the last was ever stored) */
+/* every track's engine one this firmware has (DIGITAL, 1, is one: it converts; engines.c eng_stored_ok): a project of
+ * another number is not one. Firmware up to 1.6.1 (NENGINES 14) refuses a project with a DCO track (14): EMPTY there */
 static int proj_engines_ok(const project_t *q)
 {
     uint32_t t;
     for (t = 0; t < NTRK; t++)
-        if (q->t[t].engine >= NENGINES)
+        if (!eng_stored_ok(q->t[t].engine))
             return 0;
     return 1;
 }
@@ -546,7 +547,7 @@ static int proj_import_old(project_t *q, const void *b, int n)
             q->sel = v->sel; q->parts = v->parts; q->phys = v->phys;
             for (i = 0; i < NTRK; i++) {
                 int16_t def[P_COUNT];
-                if (v->t[i].engine >= NENGINES) return 0;
+                if (!eng_stored_ok(v->t[i].engine)) return 0;
                 for (k = 0; k < P_COUNT; k++) def[k] = param_desc_of(v->t[i].engine, k)->def;
                 params_by_count(q->t[i].p, v->t[i].p, 69u, def);
                 q->t[i].engine = v->t[i].engine; q->t[i].preset = v->t[i].preset;
@@ -716,7 +717,7 @@ static int proj_unpack(project_t *q, const uint8_t *b, uint32_t st)
         int16_t values[P_COUNT], def[P_COUNT];
         for (i = 0; i < np; i++) { if (b[pos] > 191u) return 0; values[i] = (int16_t)b[pos++] - 64; }
         q->t[t].engine = b[pos++]; q->t[t].preset = b[pos++];
-        if (q->t[t].engine >= NENGINES) return 0;
+        if (!eng_stored_ok(q->t[t].engine)) return 0;
         for (i = 0; i < P_COUNT; i++) def[i] = param_desc_of(q->t[t].engine, i)->def;
         params_by_count(q->t[t].p, values, np, def);
         for (i = 0; i < NSTEP; i++) {

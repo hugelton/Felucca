@@ -61,6 +61,12 @@ static const menu_credit_t MENU_CREDITS[] = {
     {"Emilie Gillet / MIT", MC_TEXT},
     {"https://github.com/pichenettes/eurorack", MC_URL},
     {"", MC_TEXT},
+    {"ULTRAMASTER KR-106 + FM-106", MC_TITLE},   /* the DCO engine and the BBD chorus (dco_dsp.c, fx.c cho_bbd) */
+    {"Kayrock Screenprinting; PatttF", MC_TEXT},
+    {"GPL-3.0", MC_TEXT},
+    {"https://github.com/kayrockscreenprinting/ultramaster_kr106", MC_URL},
+    {"https://github.com/PatttF/fm-106", MC_URL},
+    {"", MC_TEXT},
     {"INTER TIGHT", MC_TITLE},
     {"The Inter Project Authors", MC_TEXT},
     {"SIL Open Font License 1.1", MC_TEXT},

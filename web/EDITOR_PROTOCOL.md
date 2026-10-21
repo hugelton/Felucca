@@ -90,7 +90,7 @@ watches (v2, `WATCH`), the device also sends push frames (cmds 23, 24, 26) at an
 | string | ASCII bytes, ended by a 0 byte |
 | scope | 0 = parameter of the selected track (`P_*`, 0..P_COUNT−1); 1 = global parameter (`G_*`, 0..G_COUNT−1) |
 | track | 0..3: tracks 1..4 (synth parts) |
-| engine byte | 0..NENGINES−1 (firmware before 1.0: NENGINES = its drum track, no engine). The numbers are fixed, new engines are appended: 0 ANALOG, 1 reserved (DIGITAL before 1.0: see below), 2 PHASE, 3 LOFI, 4 SAMPLE, 5 VOICE, 6 TRIO, 7 WHEEL, 8 GRAIN, 9 PHYS, 10 DRUM, 11 NOISE, 12 FM6, 13 SLICE (NENGINES 14; a build with `FELUCCA_SLICE=0` has 13). The device and the editor list them in another order (ANALOG FM6 PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS NOISE SLICE DRUM: `ENGINE_ORDER`); the numbers stay |
+| engine byte | 0..NENGINES−1 (firmware before 1.0: NENGINES = its drum track, no engine). The numbers are fixed, new engines are appended: 0 ANALOG, 1 reserved (DIGITAL before 1.0: see below), 2 PHASE, 3 LOFI, 4 SAMPLE, 5 VOICE, 6 TRIO, 7 WHEEL, 8 GRAIN, 9 PHYS, 10 DRUM, 11 NOISE, 12 FM6, 13 SLICE, 14 DCO (NENGINES 15; 14 up to 1.6.1; a build with `FELUCCA_SLICE=0` reserves 13, one with `FELUCCA_FM4=1` 14). The device and the editor list them in another order (ANALOG FM6 PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS NOISE SLICE DRUM DCO: `ENGINE_ORDER`); the numbers stay |
 
 The engine parameters are `P_E0..P_E7`: P_COUNT−8 .. P_COUNT−1 (103..110 since 1.5; 96..103 in 1.2 .. 1.4; 91..98 in
 1.1), and `INFO` gives `P_E0`.
@@ -409,7 +409,7 @@ grid lives in the steps themselves, so every engine has it:
   DRUM engine on any part: the first C key is the kick (C2 = 36), notes are GM numbers.
 - The globals `G_DRCH`, `G_DRLVL`, `G_DRREV` (ids 24..26: the old drum track's MIDI channel, level and
   reverb send) keep their ids, and `G_COUNT` stays 27. `G_DRLVL` and `G_DRREV` are inert: `DESC` gives
-  label "-", range 0..0, and no page shows them. Id 24 (`G_DRCH`, never read since 1.0) is `G_RTYPE`
+  label "-", range 0..0, and no page shows them (after 1.6.1 id 25, `G_DRLVL`, is CHORUS TYPE: see "After 1.6.1"). Id 24 (`G_DRCH`, never read since 1.0) is `G_RTYPE`
   since 1.0: the reverb's model, `DESC` label "TYPE", enum ROOM (0) / SPRING (1) / HALL (2, since 1.2), on the
   REVERB page (FX). The power-on value (`DESC` def) is HALL since 1.2, ROOM before; a project keeps its own, and
   projects of formats before FUN7 load it as ROOM. MIDI channel 10 is no longer special (channels 1..4 play
@@ -801,6 +801,29 @@ moved up by seven). Firmware 1.2 .. 1.4 refuses a FUN10 of 111 (more parameters 
 backup PUT of one answers rc 1); user presets of 111 load there by count (the seven left out). Library files of 104 map
 by label: the INSERT, TYPE and ESYNC unset.
 
+## After 1.6.1: the DCO engine, RANGE, CHORUS TYPE
+
+No new command or INFO tag; `INFO` says NENGINES 15, and `DESC` describes the new values as always. P_COUNT and P_E0 are
+unchanged.
+
+- **Engine 14, DCO**: a Juno-106 voice after fm-106 (PatttF) and Ultramaster KR-106 (Kayrock Screenprinting): E1..E8 WAVE
+  (OFF PLS SAW P+S), PW, SUB, NOIS, CUT, RES, KEY, HPF (BOOST FLAT 236 754); 20 factory presets; at most 4 voices a track.
+  It is last in `ENGINE_ORDER`. Engine 13 is reserved in a build with `FELUCCA_SLICE=0` (no SLICE), so DCO is 14 in every
+  build; a build with `FELUCCA_FM4=1` reserves 14 instead. Firmware up to 1.6.1 (NENGINES 14) refuses a DCO engine byte:
+  `UP_PUT` rc 1, a project holding one shows EMPTY there, a user preset of one reads as an empty slot.
+- **Track parameter 8, `RANGE`** (`P_DRNG`): enum 16 8 4 (unit FT), default 8 (value 1): DCO's octave. It was `P_ED_FX`
+  (label "FX", -64..63), which nothing read: a project or user preset of before holds 0 there, which no DCO track used. Only
+  DCO tracks read it; any other engine's sound load sets it back to 8. Not a motion target (`MOTION` 3 / 5 answer rc 1).
+- **Global 25, `TYPE`** (`G_CTYPE`, CHORUS TYPE): enum STD I II I+II, default STD (0), on the CHORUS page (KNOB 3). STD is
+  the chorus bus as always; I, II, I+II the Juno-106's BBD chorus (stereo, its own rates; CRT does nothing for them, CDP
+  scales their depth, 60 = the instrument's). It was `G_DRLVL` (range 0..0, label "-"): every FUN7 .. FUN10 project holds
+  0 there, STD; firmware up to 1.6.1 clamps a TYPE back to 0. A project of firmware before 1.0 (its drum level there) loads
+  STD.
+- **Settings PER5**: the favourites of engines 14 and 15 appended (64 bytes, zero in a PER4 record: none starred). The backup
+  object 1 is the PER5 record; a PER4 one (an archive of 1.6.1 or before) still restores (its favourites of engine 14 none).
+  Firmware up to 1.6.1 refuses a PER5 object (rc 1) and reads a PER5 record in flash as no settings (its defaults).
+- The user-slot marker of the favourites (`FAV_GET` / `FAV_SET`, engine `NENGINES`) is 15 now: take NENGINES from `INFO`.
+
 ## v7: full backup (65-67)
 
 INFO advertises `42 01 caps`: bit 0 = `BACKUP_LIST` / `BACKUP_GET` (read), bit 1 = `BACKUP_PUT` (restore);
@@ -1030,7 +1053,7 @@ HI-CON NIGHT MONO; 1.0.2: GREY is the MONO of 1.0.1, MONO a new black and white 
 fields are 127.
 Both u28 signatures are four least-significant-first 7-bit bytes; compare them
 to refresh changed favorites and user slots. Factory references use stable
-engine/preset ids; engine NENGINES denotes a user slot. An empty user slot
+engine/preset ids; engine NENGINES (from `INFO`: 15, 14 up to 1.6.1) denotes a user slot. An empty user slot
 cannot be marked. Factory DRUM sounds use the same favorite path.
 
 rc 0 = applied and saved; 1 = invalid arguments; 2 = unsupported feature;

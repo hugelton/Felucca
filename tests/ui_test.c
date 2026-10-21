@@ -165,6 +165,14 @@ static int check(const char *what, int ok)
 }
 
 /* main.c felucca_init */
+static uint32_t eng_mask(void)                  /* the engines one can pick (engines.c eng_ok), a bit each */
+{
+    uint32_t e, m = 0;
+    for (e = 0; e < NENGINES; e++)
+        m |= eng_ok(e) ? 1u << e : 0u;
+    return m;
+}
+
 static void ui_power_on(void)
 {
     uint32_t i;
@@ -3250,8 +3258,8 @@ static int test_layer(void)
     bad += check("REVERB page: TYPE HALL (power-on) / ROOM / SPRING on KNOB 1 (SIZE, DAMP beside it); a project keeps SPRING",
                  ok && song.g[G_RTYPE] == 1);
     go_title("CHORUS");
-    bad += check("  CHORUS page: CRT CDP", cur_page()->fam == FAM_FX && cur_page()->id[0] == G_CRATE &&
-                 cur_page()->id[1] == G_CDEPTH && cur_page()->id[2] == 0xFFu);
+    bad += check("  CHORUS page: CRT CDP TYPE", cur_page()->fam == FAM_FX && cur_page()->id[0] == G_CRATE &&
+                 cur_page()->id[1] == G_CDEPTH && cur_page()->id[2] == G_CTYPE);
     /* chording: a key held before FX stays a note, its note-off arrives */
     ui_power_on();
     mo = mo_w;
@@ -4035,11 +4043,14 @@ static int test_quick_layers(void)
     key_down(white(1)); key_up(white(1)); frame();
     ok &= TSEL->eng_req == ENGI_FM6;                    /* (G3: FM6, second in ENGINE_ORDER) */
     key_down(white(NENG_SHOWN - 1u)); key_up(white(NENG_SHOWN - 1u)); frame();
-    ok &= TSEL->eng_req == ENGI_DRUM;                   /* (the last key: DRUM) */
+    ok &= TSEL->eng_req == (FELUCCA_FM4 ? ENGI_DRUM : ENGI_DCO);   /* (the last key: DCO; FELUCCA_FM4 has none: DRUM) */
+    key_down(white(NENG_SHOWN - 1u - !FELUCCA_FM4)); key_up(white(NENG_SHOWN - 1u - !FELUCCA_FM4)); frame();
+    ok &= TSEL->eng_req == ENGI_DRUM;                   /* (DRUM before it) */
     ok &= !memcmp(TSEL->step, before.step, sizeof before.step) && TSEL->p[P_SLEN] == before.p[P_SLEN] &&
           TSEL->p[P_SLCR] == SL_STUT;
     btn_up(B_EDIT); frame();
-    bad += check("EDIT + white key n: the n-th engine shown (FM6 2nd, DRUM last), while playing; steps, LEN, SLICER stay", ok);
+    bad += check("EDIT + white key n: the n-th engine shown (FM6 2nd, DRUM, DCO last), while playing; steps, LEN, SLICER stay",
+                 ok);
     hold(B_SAVE);
     bad += check("  SAVE held: UNDO back to before the layer's loads, the steps untouched",
                  TSEL->eng_req == 0u && TSEL->preset == before.preset && !memcmp(TSEL->step, before.step, sizeof before.step));
@@ -5024,7 +5035,7 @@ static int test_fm6_charts(void)
 static int test_fm4_retired(void)
 {
     int bad = 0, ok = 1;
-    uint32_t i, k, e, total, seen = 0, all = ((1u << NENGINES) - 1u) & ~(1u << ENGI_DIGITAL);
+    uint32_t i, k, e, total, seen = 0, all = eng_mask();
     int16_t p[P_COUNT];
     uint8_t v[FP_SIZE + 1u];
     ui_power_on();
@@ -5045,10 +5056,10 @@ static int test_fm4_retired(void)
     }
     bad += check("PRESETS KNOB 2: the engines in order, DIGITAL skipped, back to the first",
                  seen == all && TSEL->eng_req == 0u && eng_step(0, 1) == ENGI_FM6 && eng_step(ENGI_FM6, 1) == 2u &&
-                 eng_step(ENGI_FM6, -1) == 0u && eng_step(0, -1) == ENGI_DRUM);
+                 eng_step(ENGI_FM6, -1) == 0u && eng_step(0, -1) == (FELUCCA_FM4 ? ENGI_DRUM : ENGI_DCO));
     {   /* the display order (engines.c ENGINE_ORDER): every engine one can pick once; the PRESETS list follows it */
         static const char *const ORDER[] = {"ANALOG", "FM6", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN",
-                                            "PHYS", "NOISE", "SLICE", "DRUM"};
+                                            "PHYS", "NOISE", "SLICE", "DRUM", "DCO"};
         uint32_t last = 0xFFu, r = 0, n = 0;
         ok = NENG_SHOWN == NELEM(ORDER);
         for (i = 0; ok && i < NENG_SHOWN; i++)
@@ -5063,7 +5074,7 @@ static int test_fm4_retired(void)
             last = e;
             r++;
         }
-        bad += check("engines shown ANALOG FM6 PHASE ... NOISE SLICE DRUM (ENGINE_ORDER); PRESETS lists them so",
+        bad += check("engines shown ANALOG FM6 PHASE ... NOISE SLICE DRUM DCO (ENGINE_ORDER); PRESETS lists them so",
                      ok && r == NENG_SHOWN);
     }
     /* a user preset stored with engine 1: kept as it is, it loads as FM6 with the converted patch */

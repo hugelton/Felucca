@@ -106,7 +106,12 @@ static uint32_t ed_bk_commit(void)
         }
         obj = OBJ_PROJECT0 + ed_bk_id - 2u;
     } else if (ed_bk_id == 1u) {
-        const persist_t *p = (const persist_t *)raw;
+        persist_t *p = (persist_t *)raw;
+        if (ed_bk_len == PERSIST_V4_LEN && p->magic == PERSIST_MAGIC_V4) {   /* an archive of firmware up to 1.6.1: */
+            memset(raw + PERSIST_V4_LEN, 0, sizeof *p - PERSIST_V4_LEN);    /* PER5 with no engine 14 / 15 favourites */
+            p->magic = PERSIST_MAGIC;
+            ed_bk_len = sizeof *p;
+        }
         if (ed_bk_len != sizeof *p || p->magic != PERSIST_MAGIC || !palette_stored_ok(p->palette) ||
             p->lowcut > 2u || !leds_stored_ok(p->zoom) || !hold_stored_ok(p->bold) || p->favorites.filter > 1u || !ed_bk_panel_valid(&p->panel)) return 2;
         obj = OBJ_SETTINGS;
@@ -168,7 +173,7 @@ static uint32_t ed_bk_write(const uint8_t *a, uint32_t n)
         if (n != 12u || a[6] > 15u || a[11] > 15u) return 1;
         uint32_t len = ed_bk_r32(a + 2);
         if (len > ED_BK_MAX || (a[1] == 0u && !proj_store_len(len)) ||
-            (a[1] == 1u && len != sizeof(persist_t)) ||
+            (a[1] == 1u && len != sizeof(persist_t) && len != PERSIST_V4_LEN) ||   /* (PER4: an older archive's) */
             (a[1] >= 2u && a[1] <= 5u && len && !proj_store_len(len)) ||
             ((a[1] == 6u || a[1] == 7u) && len && len != sizeof(up_bank_t)) ||
             (a[1] == 8u && len && len != sizeof(fm6_bank_t)) || (a[1] == 9u && len && len != sizeof(upf_t))) return 1;

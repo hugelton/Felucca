@@ -75,9 +75,9 @@ Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`, `c
 | `FELUCCA_UAC_AS_FIRST` | 1 | the audio control header lists the audio streaming interface before the MIDI one, so the USB audio driver of older macOS (up to 15) finds it; `0`: 1.0 to 1.5's order, byte for byte (`firmware/src/usb.c`) |
 | `FELUCCA_CPU2` | 1 | the second core is built in (MENU > SYSTEM > 2ND CORE, OFF by default); `0`: none of it, 1.6's one-core code and RAM (`firmware/hal/fm1_cpu1.h`, `firmware/src/fx.c`) |
 | `FELUCCA_UART` | 1 | TRS MIDI IN |
-| `FELUCCA_SLICE` | 1 | the SLICE engine |
+| `FELUCCA_SLICE` | 1 | the SLICE engine (`0`: engine 13 reserved, so DCO stays 14) |
 | `FELUCCA_ICONS` | 1 | parameter icons on the knob cards |
-| `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion |
+| `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion (a test build: the DCO engine is left out, the EDIT layer has room for 14) |
 
 `FELUCCA_USB_LAYOUT` (`0` to `3`, default `0`) picks other USB descriptor layouts for testing; see
 `firmware/src/usb.c`.
@@ -115,8 +115,8 @@ Runs the host tests and, with Node.js, the web page tests (and, with Emscripten 
 user presets, projects of every format, backup, the keys and knobs, MIDI (USB, TRS, clock,
 control), USB audio, the update entry and loader, the command-line installer, the UI (the real
 drawing code against stubs: every screen in every palette is rendered and checked for clipped or
-overlapping text; PNGs land in `build/ui_new/`), every engine (DRUM, NOISE, PHYS, FM6, SLICE, the
-DIGITAL conversion), the chord keys, the modulation matrix, the FX layer, the reverbs, the SLICER
+overlapping text; PNGs land in `build/ui_new/`), every engine (DRUM, NOISE, PHYS, FM6, SLICE, DCO, the
+DIGITAL conversion), the chord keys, the modulation matrix, the FX layer, the reverbs and the BBD chorus, the SLICER
 and swing. With `DAISYSP` pointing at a DaisySP checkout, the PHYS models are also compared with
 their floating-point originals; without it that test is skipped. Felucca-Engines' own test
 (`firmware/engines/tests/run.sh`) runs too, and its standalone host is built once more with Felucca's tables

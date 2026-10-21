@@ -155,6 +155,7 @@ static const icon_map_t ICON_MAP[] = {
     {"FREQ", ICON_CUTOFF}, {"TRK", ICON_KEYTRACK}, {"DRFT", ICON_SWEEP},   /* NOISE (COLR, DENS, CRSH: above) */
     {"MLVL", ICON_MOD}, {"MRAT", ICON_RATIO}, {"MEG", ICON_DECAY}, {"VMOD", ICON_ACCENT}, {"DTUN", ICON_DETUNE},
     {"SLOT", ICON_LOAD},                                                    /* FM6 (ALG, FB: above) */
+    {"KEY", ICON_KEYTRACK}, {"HPF", ICON_CUTOFF}, {"RANGE", ICON_OCTAVE},   /* DCO (WAVE PW SUB NOIS CUT RES: above) */
     /* fixed columns drawn by ui_draw.c (STEP page, preset browser) */
     {"NOTE", ICON_PITCH}, {"STEP", ICON_STEPS}, {"FLAG", ICON_ACCENT}, {"ACC", ICON_ACCENT}, {"LANE", ICON_DRUM}, {"HIT", ICON_GATE}, {"SLD", ICON_SLIDE},
     {"TRACK", ICON_MIX},                  /* TRACKS page (LEVEL, LEN, PAN: above) */
@@ -254,6 +255,7 @@ static uint32_t engine_icon(const char *name)
         {"DRUM", ICON_DRUM},
         {"NOISE", ICON_NOISE},
         {"FM6", ICON_MOD},                    /* (symbol_modular: six operators patched; a glyph of its own wanted) */
+        {"DCO", ICON_PULSE},                  /* (the Juno's pulse and PWM) */
     };
     uint32_t i;
     for (i = 0; i < sizeof M / sizeof M[0]; i++)

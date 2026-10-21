@@ -27,6 +27,10 @@
  *    of the averaged spectrum: the metallic tone) and flutter (echoes at a fixed period) against ROOM, SPRING
  *    and COMB8 (8 combs + 4 allpasses, of which ROOM is the first half: a host-only reference, over twice ROOM's
  *    memory); model changes ROOM / SPRING / HALL both ways.
+ * CHORUS TYPE (G_CTYPE: STD, the Juno-106's BBD I, II, I+II, fx.c cho_bbd): STD bit for bit (1. above: the chorus is in
+ *    ref_buses); each BBD bounded on full-scale noise without DC, DEPTH 0 no stereo difference, its LFO's rate from
+ *    the nulls of the side (0.514, 0.843, 7.86 Hz, +-10 %); STD -> I -> II -> I+II -> STD while a tone sounds, no
+ *    click, the line cleared after; with HALL, both differences in rev_side; the cost against STD.
  * Demos (WAV) into DEMODIR: a drum pattern and a pluck through SPRING, the drums through ROOM to compare; into
  * DEMODIR2 the listening set: drums, pluck, piano, dry and through ROOM, SPRING, HALL and COMB8 at SIZE 40,
  * 90, 127. */
@@ -972,6 +976,163 @@ static void demo2(const char *dir, int src, int m, int size)
     printf("reverb: demo %s\n", path);
 }
 
+/* ---------------------------------------------------------- BBD chorus --- */
+/* CHORUS TYPE (G_CTYPE, fx.c cho_bbd): the buses quiet, the chorus send only, from a clean BBD */
+static void bbd_reset(int type, int depth)
+{
+    host_tracks_init();
+    rev_clear();
+    memset(dly_buf, 0, sizeof dly_buf);
+    memset(cho_buf, 0, sizeof cho_buf);
+    memset(bbd_buf, 0, sizeof bbd_buf);
+    memset(&bbd, 0, sizeof bbd);
+    fx.dly_lp = 0;
+    song.g[G_RTYPE] = 0;
+    fx.rtype = 0;
+    song.g[G_CTYPE] = (int16_t)type;
+    song.g[G_CDEPTH] = (int16_t)depth;
+}
+
+/* nb blocks of a sine (hz; 0: noise) sent to the chorus through the buses: the wet bus (mid) and rev_side (side) */
+static void bbd_run(double hz, uint32_t nb, int32_t *mid, int32_t *side)
+{
+    static int32_t c[CTL], z[CTL], w[CTL];
+    uint32_t b, i;
+    for (b = 0; b < nb; b++) {
+        for (i = 0; i < CTL; i++) {
+            c[i] = hz > 0 ? (int32_t)(30000 * sin(2 * M_PI * hz * (b * CTL + i) / FS)) : noise(60000);
+            z[i] = 0;
+        }
+        fx_buses(c, z, z, w, CTL);
+        for (i = 0; i < CTL; i++) {
+            mid[b * CTL + i] = w[i];
+            side[b * CTL + i] = hl.side ? rev_side[i] : 0;
+        }
+    }
+}
+
+/* the side's nulls a second, halved (the taps cross twice an LFO cycle): its RMS in windows of w samples, the minima
+ * under a fifth of the peak (the tone low enough that the taps' difference stays under half its period) */
+static double null_rate(const int32_t *s, uint32_t n, uint32_t w)
+{
+    static double e[8192];
+    uint32_t k, nw = n / w, c = 0, low = 0;
+    double peak = 0;
+    for (k = 0; k < nw && k < 8192u; k++) {
+        double a = 0;
+        uint32_t i;
+        for (i = 0; i < w; i++)
+            a += (double)s[k * w + i] * s[k * w + i];
+        e[k] = sqrt(a / w);
+        peak = e[k] > peak ? e[k] : peak;
+    }
+    for (k = 0; k < nw && k < 8192u; k++) {
+        if (!low && e[k] < peak * 0.2) {
+            low = 1;
+            c++;
+        } else if (low && e[k] > peak * 0.5) {
+            low = 0;
+        }
+    }
+    return (double)c * FS / (nw * w) / 2.0;
+}
+
+static int32_t bm[12 * FS], bs[12 * FS];
+
+static void test_bbd(void)
+{
+    static const char *const T[4] = {"STD", "I", "II", "I+II"};
+    static const double HZ[4] = {0, 0.514, 0.843, 7.86};
+    uint32_t t, i;
+    char what[240];
+    for (t = 1; t <= 3u; t++) {
+        int32_t peak = 0, sp0 = 0;
+        double mean = 0, rate;
+        uint32_t secs = t == 3u ? 4u : 12u, n2 = 2u * FS / CTL * CTL, n1 = FS / CTL * CTL;
+        bbd_reset((int)t, 127);                        /* noise at the deepest */
+        bbd_run(0, n2 / CTL, bm, bs);
+        for (i = 0; i < n2; i++) {
+            int32_t l = abs(bm[i] + bs[i]), r = abs(bm[i] - bs[i]);
+            peak = l > peak ? l : peak;
+            peak = r > peak ? r : peak;
+            mean += (double)bm[i] / n2;
+        }
+        bbd_reset((int)t, 0);                           /* DEPTH 0: both taps the same, no difference */
+        bbd_run(1000, n1 / CTL, bm, bs);
+        for (i = 0; i < n1; i++)
+            sp0 = abs(bs[i]) > sp0 ? abs(bs[i]) : sp0;
+        bbd_reset((int)t, 60);                          /* the instrument's depth: its rate from the side's nulls */
+        bbd_run(t == 3u ? 500 : 50, secs * FS / CTL, bm, bs);
+        rate = null_rate(bs, secs * FS / CTL * CTL, t == 3u ? FS / 250u : FS / 50u);
+        snprintf(what, sizeof what, "BBD %s: noise bounded (peak %d), no DC (%.0f), DEPTH 0 no difference (%d), LFO %.3f Hz "
+                 "(%.3f)", T[t], peak, mean, sp0, rate, HZ[t]);
+        check(what, peak < 90000 && fabs(mean) < 0.01 * peak && sp0 == 0 && fabs(rate / HZ[t] - 1) < 0.1);
+    }
+    {   /* STD -> I -> II -> I+II -> STD while a tone sounds: no click, the line silent and cleared after */
+        static const int8_t SEQ[5] = {0, 1, 2, 3, 0};
+        int32_t prev = 0, step = 0, own = 0, nz = 0;
+        uint32_t k, b, nb = FS / 2u / CTL;
+        bbd_reset(0, 60);
+        for (k = 0; k < 5u; k++) {
+            song.g[G_CTYPE] = SEQ[k];
+            bbd_run(220, nb, bm, bs);
+            for (i = 0; i < nb * CTL; i++) {
+                int32_t L = bm[i] + bs[i], s = abs(L - prev);
+                if (k && i < 4u * CTL)
+                    step = s > step ? s : step;
+                else if (i >= FS / 10u)
+                    own = s > own ? s : own;
+                prev = L;
+            }
+        }
+        for (b = 0; b < BBD_LEN; b++)
+            nz += bbd_buf[b] != 0;
+        snprintf(what, sizeof what, "CHORUS TYPE STD -> I -> II -> I+II -> STD with a tone: largest step %d at a change (its "
+                 "own %d), back on STD the BBD stopped (%d samples left in its line)", step, own, nz);
+        check(what, step <= 2 * own + 64 && !bbd.type && !nz);
+    }
+    {   /* HALL and BBD at once: the BBD's difference into rev_side with HALL's */
+        int32_t sh = 0, sb = 0;
+        bbd_reset(0, 60);
+        song.g[G_RTYPE] = 2;
+        fx.rtype = 2;
+        bbd_run(0, FS / CTL, bm, bs);                   /* noise into the chorus only: HALL hears nothing */
+        for (i = 0; i < FS / CTL * CTL; i++)
+            sh = abs(bs[i]) > sh ? abs(bs[i]) : sh;
+        bbd_reset(1, 60);
+        song.g[G_RTYPE] = 2;
+        fx.rtype = 2;
+        bbd_run(0, FS / CTL, bm, bs);
+        for (i = 0; i < FS / CTL * CTL; i++)
+            sb = abs(bs[i]) > sb ? abs(bs[i]) : sb;
+        snprintf(what, sizeof what, "HALL with BBD I: the BBD's difference added to HALL's (side peak %d, HALL alone %d)", sb,
+                 sh);
+        check(what, sh == 0 && sb > 1000 && sb < 90000);
+    }
+    if (instr_now()) {                                  /* the bus stage with a BBD against STD */
+        static int32_t c[CTL], z[CTL], w[CTL];
+        double cs[2];
+        uint32_t k, b, nb = 2u * FS / CTL;
+        for (k = 0; k < 2u; k++) {
+            uint64_t i0;
+            bbd_reset((int)k * 2, 60);
+            for (i = 0; i < CTL; i++) {
+                c[i] = noise(60000);
+                z[i] = 0;
+            }
+            i0 = instr_now();
+            for (b = 0; b < nb; b++)
+                fx_buses(c, z, z, w, CTL);
+            cs[k] = (double)(instr_now() - i0) / (nb * CTL);
+        }
+        snprintf(what, sizeof what, "cost: the buses with BBD II %.0f instructions a sample, STD %.0f (+%.0f, ~%.2f %% on the "
+                 "device)", cs[1], cs[0], cs[1] - cs[0], (cs[1] - cs[0]) * 0.017);
+        check(what, cs[1] - cs[0] < 160);
+    }
+    song.g[G_CTYPE] = 0;
+    song.g[G_CDEPTH] = 60;
+}
+
 int main(int argc, char **argv)
 {
     test_room_identical();
@@ -980,6 +1141,7 @@ int main(int argc, char **argv)
     test_hall();
     test_clear();
     test_switch();
+    test_bbd();
     test_cost();
     if (argc > 1) {
         demo(argv[1], "spring_drums", 1, 0);

@@ -222,9 +222,8 @@ static const uint8_t MIDI_CC_ENG[NENGINES] = {
     0x56, 0x00, 0x30, 0x80, 0x50, 0x07, 0x67, 0x00,   /* ANALOG CUT RES, -, PHASE DCW, LOFI TONE, SAMPLE CUT, VOICE Q,
                                                        * TRIO CUT RES, WHEEL - */
     0x80, 0x30, 0x30, 0x34, 0x30,                     /* GRAIN TONE, PHYS BRIT, DRUM TONE, NOISE FREQ RES, FM6 MLVL */
-#if FELUCCA_SLICE
-    0x80,                                             /* SLICE TONE */
-#endif
+    FELUCCA_SLICE ? 0x80 : 0x00,                      /* SLICE TONE (FELUCCA_SLICE=0: reserved) */
+    0x56,                                             /* DCO CUT RES */
 };
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)
@@ -238,8 +237,8 @@ static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)
 }
 /* MIDI LEARN (1.5, Discussion #170): up to ML_N CCs, each set to one parameter of one track, whatever channel it
  * comes on (a channel ROUT ignores stays ignored) and whichever track that channel plays. Kept with the settings in
- * the 32 bytes of favorites.factory[14] (no engine 14: favorites.c; all 0 in every older setting = nothing learned),
- * an entry two bytes, as a 16-bit value LSB first: bits 0..6 the CC, 7..8 the track, 9..15 the parameter's code, 0 =
+ * the 32 bytes of favorites.factory[14] (no engine's favourites: engine 14's are in favorites.ext; all 0 in every older
+ * setting = nothing learned), an entry two bytes, as a 16-bit value LSB first: bits 0..6 the CC, 7..8 the track, 9..15 the parameter's code, 0 =
  * an empty entry: a common parameter its P_* id + 1 (1 .. ML_E0 - 1: their ids never move, new ones go before P_E0),
  * an engine parameter ML_E0 + k for P_E0 + k (P_E0 moves when common ones are added). A learned CC no longer reaches
  * the standard map (#103) on any channel: the controller is the user's now. The CCs with a meaning of their own

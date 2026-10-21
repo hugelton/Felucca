@@ -28,10 +28,13 @@
                                             * second core (mod.c, voice.c SPREAD, eng_formant.c): one each with two cores,
                                             * one for all with one, as up to 1.6 */
 #define C1_PI(t) ((uint32_t)((t) - trk) % C1_NP)   /* a part's copy */
-#define NENGINES (13 + FELUCCA_SLICE)   /* SLICE (13) comes last: the other engines keep their numbers */
+#define NENGINES 15              /* the engine numbers (engines.c ENGINES[]: append-only): SLICE 13 (FELUCCA_SLICE=0: a
+                                  * reserved slot, so DCO keeps its number), DCO 14 */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
-                                                * in the display order of engines.c ENGINE_ORDER */
+#define ENGI_SLICE 13u           /* reserved with FELUCCA_SLICE=0: never selectable, never stored (eng_stored_ok) */
+/* the engines one can pick: PRESETS, the EDIT layer, the editor, in the display order of engines.c ENGINE_ORDER. DCO
+ * (14) not with FELUCCA_FM4 (a test build of the retired DIGITAL: the EDIT layer's keys hold 14 engines at most) */
+#define NENG_SHOWN (NENGINES - !FELUCCA_FM4 - !FELUCCA_SLICE - FELUCCA_FM4)
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 
 /* ------------------------------------------------------- parameters --- */
@@ -42,7 +45,8 @@
 enum {                          /* per-track parameters */
     P_LEVEL,
     P_ATK, P_DEC, P_SUS, P_REL,
-    P_ED_FLT, P_ED_PIT, P_ED_SHP, P_ED_FX,     /* P_ED_FX: unused, kept for the formats / protocol */
+    P_ED_FLT, P_ED_PIT, P_ED_SHP, P_DRNG,      /* P_DRNG: DCO's RANGE 16' 8' 4' (eng_dco.c); P_ED_FX until 1.6.1,
+                                                * which nothing read (stored 0 there: no DCO track before) */
     P_LRATE, P_LWAVE, P_LPHASE, P_LFADE,
     P_LD_PIT, P_LD_FLT, P_LD_SHP, P_LD_AMP,
     P_AMODE, P_ARATE, P_AOCT, P_AGATE,
@@ -86,11 +90,15 @@ enum {                          /* global parameters */
     G_RTYPE,                    /* REVERB TYPE: 0 ROOM, 1 SPRING, 2 HALL (1.2, the power-on default) (fx.c). Was
                                  * G_DRCH, the GM drum part's MIDI channel (inert since 1.0, never read); projects
                                  * of formats before FUN7 load it as ROOM (project.c proj_rtype_room) */
-    G_DRLVL, G_DRREV,           /* inert (label "-", on no page): the GM drum part they set is gone; kept
-                                 * because the ids and G_COUNT are fixed by the formats and the protocol (only
-                                 * the import of an old project reads them: proj_drums_to_part) */
+    G_CTYPE,                    /* CHORUS TYPE: 0 CLASSIC (as always), 1 BBD I, 2 BBD II, 3 BBD I+II (fx.c cho_bbd; after
+                                 * 1.6.1). Was G_DRLVL, the GM drum part's level: inert (0..0) since 1.0, so every
+                                 * FUN7.. project holds 0 there; firmware up to 1.6.1 clamps a TYPE back to 0, CLASSIC */
+    G_DRREV,                    /* inert (label "-", on no page): the GM drum part it set is gone; kept because the
+                                 * ids and G_COUNT are fixed by the formats and the protocol (only the import of an
+                                 * old project reads it, and G_DRLVL: proj_drums_to_part) */
     G_COUNT
 };
+#define G_DRLVL G_CTYPE          /* (in a project before 1.0: the drum part's level; project.c proj_drums_to_part) */
 
 /* stored parameters of an older layout -> today's P_* order. A store keeps np = the P_COUNT it was
  * written with; common parameters are only ever added just before P_E0, so the first np - 8 are
@@ -108,6 +116,7 @@ static void params_by_count(int16_t *out, const int16_t *in, uint32_t np, const 
 /* engine indices the stores name (engines.c ENGINES[]: append-only) */
 #define ENGI_PHYS 9u
 #define ENGI_DRUM 10u
+#define ENGI_DCO 14u
 /* PHYS MODEL DRUM (MODEL 4, before 1.0) -> the DRUM engine, its E values in place: {MODEL, TUNE, TONE, DECY,
  * SNAP, ACC, KICK 0..127, PERC 0..127} -> {KIT, TUNE, TONE, DECY, SNAP, ACC, KICK 0..1, DRV 0}. 1 = it was one
  * (its engine is ENGI_DRUM now); projects (project.c) and user presets (upreset.c) */

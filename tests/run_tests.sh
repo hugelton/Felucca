@@ -128,6 +128,8 @@
 #                   settings and levels), no offset, level, stereo, echo density / ringing / flutter against ROOM, SPRING
 #                   and COMB8 (8 combs + 4 allpasses, host only, for comparison), model changes both ways, cost; the
 #                   listening set in build/reverb_demo/ (drums, pluck, piano: dry and each model at SIZE 40 / 90 / 127).
+#                   CHORUS TYPE (src/fx.c cho_bbd): STD bit for bit, the BBD I / II / I+II bounded, no DC, stereo, their
+#                   LFO rates, type changes without a click, with HALL, the cost.
 # SLICE (tests/slice_test.c): slice tables, AUTO onsets of a user-slot loop, reverse, keys, modes, the MAN slices
 #                   (SLICES page) and their store in the slot (src/slice_store.c); the presets and the loop;
 #                   demos in build/slice_demo/.
@@ -170,6 +172,10 @@
 # NOISE (tests/noise_test.c): the engine (engines/src/eng_noise.c): COLR's slope (white, pink, brown), the filter and the
 #                   register clock following the key, META periodic at the key, no DC, no clipping at the
 #                   corners, a note from silence the same twice, the cost per voice; demos in build/noise_demo/.
+# DCO (tests/dco_test.c): the Juno-106 voice after fm-106 / KR-106 (src/eng_dco.c, src/dco_dsp.c): pitch of every WAVE
+#                   and RANGE and the SUB, no DC, bounded at the corners, a resonance ringing by itself, the HPF's four
+#                   positions, KEY tracking, a click-free retrigger, the 4-voice cap, UNISON's phases, the same state the
+#                   same samples, the cost per voice; demos in build/dco_demo/.
 # DIGITAL -> FM6 (tests/fm4_test.c, built with FELUCCA_FM4=1): the retired four-operator engine against its conversion
 #                   (src/fm4_convert.c): routes and carriers per algorithm, the presets' PTCH, and the sound (pitch,
 #                   centroid, RMS envelope) of its presets and algorithms; demos in build/fm4_demo/. tests/digital_test.c
@@ -373,7 +379,7 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "FX layer effects: on the 1/16, stereo, too-long REPEAT, SLICER, silent keys, idle bit-identical, clicks, OCT UP / DN, FLANGER, PHASER, the key map, dotted TIME, REV / ECHO THROW, cost, demos" "$OUT/perform_test" build/perform_demo build/fx_demo build/throw_demo
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/reverb_test" tests/reverb_test.c -lm
     mkdir -p build/reverb_demo
-    run "REVERB TYPE: ROOM / SPRING bit-identical, SPRING and HALL decay / stability / level, HALL silence / stereo / ringing, model changes, cost, demos" "$OUT/reverb_test" build/fx_demo build/reverb_demo
+    run "REVERB TYPE: ROOM / SPRING bit-identical, SPRING and HALL decay / stability / level, HALL silence / stereo / ringing, model changes, CHORUS TYPE BBD, cost, demos" "$OUT/reverb_test" build/fx_demo build/reverb_demo
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/regress" tests/regress.c -lm
     run "regression: golden renders, health, voices, CPU budget (2ND CORE OFF: one core)" "$OUT/regress" tests/golden.txt tests/cpu_baseline.txt
     $CC -O2 -w -DFELUCCA_CPU2=0 -Ibuild/gen -Ifirmware/src -o "$OUT/regress_cpu2_0" tests/regress.c -lm
@@ -425,6 +431,10 @@ if [ -f build/gen/felucca_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/noise_test" tests/noise_test.c -lm
     mkdir -p build/noise_demo
     run "NOISE: colour slopes, key-tracked filter and clock, META period, DC, clipping, retrigger, cost, demos" "$OUT/noise_test" build/noise_demo
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/dco_test" tests/dco_test.c -lm
+    mkdir -p build/dco_demo
+    run "DCO: pitch, RANGE, SUB, DC, bounds, self-oscillation, HPF, KEY, retrigger, voices, UNISON, determinism, cost, demos" \
+        "$OUT/dco_test" build/dco_demo
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/fm6_test" tests/fm6_test.c -lm
     mkdir -p build/fm6_demo
     run "FM6: algorithms, envelopes, retrigger, DC, clipping, macros, patch formats, voices, cost, demos" "$OUT/fm6_test" build/fm6_demo

@@ -3,7 +3,8 @@
 /* Robustness against damaged or crafted stored data and editor requests (the 1.0.4 audit's items 5-10): the real
  * C paths of the editor build (editor_test.c is the base: hostsim, stubs, RAM flash).
  *   user sample slots   a SLICE scan bounded by the slot's size; a slot that fails its check leaves no zone behind
- *   projects            an engine number past the last refused (every format, and a RAM restore); a retained
+ *   projects            an engine number past the last refused (every format, and a RAM restore); a DCO track and
+ *                       CHORUS TYPE stored and restored, out-of-range RANGE / TYPE clamped; a retained
  *                       older-format RAM slot bounded as one from flash
  *   user presets        a bank from flash or a backup: each record's pattern inside its fields
  *   editor              a malformed SMP_END / BACKUP_PUT does not stop the transport */
@@ -57,6 +58,26 @@ static int projects(void)
     reset();
     project_capture(&p);
     bad += check("a captured project packs and imports", proj_pack(&st, &p) && proj_import(&q, &st, PROJ_STORE_SIZE));
+    {   /* after 1.6.1: a DCO track (engine 14) with RANGE 4', CHORUS TYPE I+II: stored and restored; out of their
+         * ranges (crafted): clamped */
+        static project_t d;
+        static project_store_t ds;
+        host_preset(&trk[1], ENGI_DCO, 13);
+        trk[1].p[P_DRNG] = 2;
+        song.g[G_CTYPE] = 3;
+        project_capture(&d);
+        reset();
+        bad += check("a DCO track (RANGE 4') and CHORUS TYPE I+II: FUN10 round trip",
+                     proj_pack(&ds, &d) && proj_import(&q, &ds, PROJ_STORE_SIZE) && !project_restore_runtime(&q) &&
+                     trk[1].eng_req == ENGI_DCO && trk[1].preset == 13u && trk[1].p[P_DRNG] == 2 && song.g[G_CTYPE] == 3);
+        d.g[G_CTYPE] = 9;
+        d.t[1].p[P_DRNG] = 50;
+        d.sum = proj_sum(&d);
+        reset();
+        bad += check("  CHORUS TYPE 9 and RANGE 50 restore inside their ranges (I+II, 4')",
+                     !project_restore_runtime(&d) && song.g[G_CTYPE] == 3 && trk[1].p[P_DRNG] == 2);
+        reset();
+    }
     pos = 68u + st.raw[66];                                 /* track 1's engine byte (after its parameters) */
     for (e0 = NENGINES; e0 < 256u; e0 += 37u) {
         st.raw[pos] = (uint8_t)e0;

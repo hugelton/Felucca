@@ -65,6 +65,29 @@ int main(void)
                favorites.factory[ENGI_DRUM][0] == 1u);
         p = original; assert(settings_import(&p, sizeof p) == 1);
     }
+    {   /* PER5 (after 1.6.1): the favourites of engines 14, 15 (favorites.ext) appended. A PER4 record (firmware up to
+         * 1.6.1) migrates with none of them starred, every other byte as saved (row 15's settings too); PER5 round trips */
+        persist_t q = original;
+        uint32_t i, z = 1;
+        assert(sizeof q == PERSIST_V4_LEN + 64u && sizeof favorites == sizeof q.favorites);
+        q.magic = PERSIST_MAGIC_V4;
+        q.favorites.factory[15][26] = 2;               /* HOME: LEVELS (ui.c ui_home_view) */
+        q.favorites.factory[14][0] = 0x55;             /* MIDI LEARN's map (midi_learn.c) */
+        memset(q.favorites.ext, 0xA5, sizeof q.favorites.ext);   /* (past a PER4 record: whatever was there) */
+        assert(settings_import(&q, (int)PERSIST_V4_LEN) == 2);
+        for (i = 0; i < sizeof favorites.ext; i++)
+            z &= ((const uint8_t *)favorites.ext)[i] == 0;
+        assert(z && favorites.factory[15][26] == 2 && favorites.factory[14][0] == 0x55 &&
+               favorites.factory[8][0] == 1 && favorites.user == 1u << 31 && favorites.filter);
+        q = original;
+        q.favorites.ext[0][2] = 1u << 3;               /* engine 14 (DCO), preset 19 */
+        assert(settings_import(&q, sizeof q) == 1 && favorites.ext[0][2] == 1u << 3);
+        settings_export(&q);
+        assert(q.magic == PERSIST_MAGIC && q.favorites.ext[0][2] == 1u << 3 && q.favorites.factory[8][0] == 1);
+        q.magic = PERSIST_MAGIC_V4;                    /* a PER4 magic on a PER5-sized record: neither */
+        assert(settings_import(&q, sizeof q) == 0);
+        p = original; assert(settings_import(&p, sizeof p) == 1);
+    }
 #endif
     settings.lowcut = 0;
     settings_export(&p);
@@ -210,5 +233,5 @@ int main(void)
 #endif
     assert(settings_import(&p, 3) == 0 && settings_import(&p, -1) == 0);
     assert(settings_import(&p, sizeof p - 1) == 0);
-    puts("Settings: PER1/PER2/PER3 migration, palette ids, calibration, HOLD, LEDS, CLICK / COUNT-IN, the FX key map, MIDI LEARN's map and independent feature preservation passed.");
+    puts("Settings: PER1/PER2/PER3/PER4 migration, palette ids, calibration, HOLD, LEDS, CLICK / COUNT-IN, the FX key map, MIDI LEARN's map and independent feature preservation passed.");
 }

@@ -14,6 +14,8 @@ thanks the work below; each keeps its own licence (see [LICENSE](LICENSE), [LICE
 - VOICE engine: after [klattsch](https://github.com/tgies/klattsch) by Tony Gies (MIT); formant data from Klatt (1980) and Hillenbrand et al. (1995)
 - PHYS engine: models ported from [DaisySP](https://github.com/electro-smith/DaisySP) by Electrosmith and Emilie Gillet ([MIT](LICENSES/MIT-DaisySP.txt)) and from Emilie Gillet's [eurorack](https://github.com/pichenettes/eurorack) code ([MIT](LICENSES/MIT-Rings.txt))
 - FM6 engine: msfa from [Dexed](https://github.com/asb2m10/dexed) by Google Inc. and Pascal Gauthier ([Apache-2.0](LICENSES/Apache-2.0-msfa.txt))
+- DCO engine and the BBD chorus (CHORUS TYPE I, II, I+II): the Juno-106 models of [Ultramaster KR-106](https://github.com/kayrockscreenprinting/ultramaster_kr106) by Kayrock Screenprinting,
+  through [fm-106](https://github.com/PatttF/fm-106) by [PatttF](https://github.com/PatttF), their fixed-point port to the FM-1 (both GPL-3.0); its presets are Juno-106 factory patches as they carry them
 - Second core: its start, mailbox and guards from [X0X](https://github.com/charlesvestal/fm1-x0x) by [charlesvestal](https://github.com/charlesvestal)
   with the dual-core findings of [Melodee](https://github.com/keremimo/melodee) by [keremimo](https://github.com/keremimo); its audio split,
   measurements and hardening after [Jangada](https://github.com/zednaked/jangada) by [zednaked](https://github.com/zednaked) (all GPL-3.0)

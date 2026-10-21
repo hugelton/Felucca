@@ -213,6 +213,21 @@ int main(void)
     ps.bold = 1;                                         /* an older backup (its font weight): HOLD 0.4 s */
     bad += check("settings of an older backup restore with HOLD 0.4 s",
                  put_all(1, &ps, sizeof ps, st_crc32(&ps, sizeof ps)) == 0 && HOLD_MS[settings_hold] == 400u);
+    {   /* an archive of firmware up to 1.6.1: its settings PER4 (no favourites of engines 14, 15): restored, as PER5 */
+        static persist_t p4;
+        st_hdr_t h;
+        p4 = ps;
+        p4.magic = PERSIST_MAGIC_V4;
+        p4.lowcut = 1;
+        favorites.ext[0][0] = 1;                         /* (a DCO preset starred now: the old archive has none) */
+        bad += check("settings of a 1.6.1 archive (PER4, 64 bytes shorter) restore as PER5 without DCO favourites",
+                     put_all(1, &p4, (uint32_t)PERSIST_V4_LEN, st_crc32(&p4, (uint32_t)PERSIST_V4_LEN)) == 0 &&
+                     settings.lowcut == 1u && !favorites.ext[0][0] && st_current(OBJ_SETTINGS, &h) >= 0 &&
+                     h.len == sizeof(persist_t));
+        p4.magic = PERSIST_MAGIC;                        /* a PER5 magic on a PER4 length: neither */
+        bad += check("  a PER4-long object that says PER5 is refused",
+                     put_all(1, &p4, (uint32_t)PERSIST_V4_LEN, st_crc32(&p4, (uint32_t)PERSIST_V4_LEN)) == 2u);
+    }
     before = erases;
     ps.bold = HOLD_TAG + 7u;
     bad += check("settings with an unknown HOLD value are refused, nothing written",

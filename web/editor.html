@@ -1667,7 +1667,7 @@ function makeMockDevice(opt = {}) {
   const TP = [
     D("LVL", F.DB, 0, 127, 104),
     D("ATK", F.TIME, 0, 127, 10), D("DEC", F.TIME, 0, 127, 70), D("SUS", F.PCT, 0, 127, 90), D("REL", F.TIME, 0, 127, 60),
-    D("FLT", F.BIPCT, -64, 63, 0), D("PIT", F.BIPCT, -64, 63, 0), D("SHP", F.BIPCT, -64, 63, 0), D("FX", F.BIPCT, -64, 63, 0),
+    D("FLT", F.BIPCT, -64, 63, 0), D("PIT", F.BIPCT, -64, 63, 0), D("SHP", F.BIPCT, -64, 63, 0), D("RANGE", F.ENUM, 0, 2, 1, ["16", "8", "4"], "FT"),   /* (id 8: DCO's, was FX) */
     D("RATE", F.LFOHZ, 0, 127, 60), E("WAVE", ["SIN", "TRI", "SAW", "SQR", "S&H"], 0), D("PHS", F.INT, 0, 127, 0), D("FADE", F.TIME, 0, 127, 0),
     D("PIT", F.BIPCT, -64, 63, 0), D("FLT", F.BIPCT, -64, 63, 0), D("SHP", F.BIPCT, -64, 63, 0), D("AMP", F.PCT, 0, 127, 0),
     E("MODE", ["OFF", "UP", "DN", "UPDN", "RND", "ORD", "REPEAT", "DNUP", "UP+8", "CONV", "DIVG", "PINKY", "THUMB", "WALK", "CHORD"], 0), E("RATE", NDIV, 2), D("OCT", F.INT, 1, 4, 1), D("GATE", F.PCT, 1, 127, 64),
@@ -1687,10 +1687,11 @@ function makeMockDevice(opt = {}) {
     E("MIDI", ["USB", "TRS"], 0), E("SYNC", NDASH, 0), E("ROUT", ["CH1-4", "SEL", "CH5-8", "CH9-12", "CH13-16", "TRACK"], 0), D("CPU", F.INT, 0, 0, 0),
     D("SLOT", F.INT, 1, 4, 1), E("NAME", NDASH, 0), E("LOAD", NGO, 0), E("SAVE", NGO, 0),
     E("ENG", ["ANALOG", "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL",
-      "GRAIN", "PHYS", "DRUM", "NOISE", "FM6", "SLICE"], 0), E("SET", NGO, 0),
+      "GRAIN", "PHYS", "DRUM", "NOISE", "FM6", "SLICE", "DCO"], 0), E("SET", NGO, 0),
     E("CLRSQ", NGO, 0), E("INIT", NGO, 0),
     E("TYPE", ["ROOM", "SPRING", "HALL"], 2),       /* G_RTYPE (id 24, was G_DRCH): the reverb's model (HALL: 1.2) */
-    D("-", F.INT, 0, 0, 0), D("-", F.INT, 0, 0, 0),   /* G_DRLVL, G_DRREV: inert since 1.0 */
+    E("TYPE", ["STD", "I", "II", "I+II"], 0),        /* G_CTYPE (id 25, was G_DRLVL): CHORUS TYPE, STD or the BBD */
+    D("-", F.INT, 0, 0, 0),                          /* G_DRREV: inert since 1.0 */
   ];
   const NONE = D("-", F.INT, 0, 0, 0);
   const RATIO = [".5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "14", "16"];
@@ -1774,6 +1775,18 @@ function makeMockDevice(opt = {}) {
         E("DIV", ["4", "8", "16", "32", "AUTO", "MAN"], 2), D("START", F.INT, 0, 31, 0), D("PTCH", F.SEMI, -24, 24, 0),
         E("MODE", ["ONE", "GATE", "LOOP"], 0), E("REV", ["OFF", "ON"], 0), D("DCAY", F.TIME, 0, 127, 127), D("TONE", F.INT, 0, 127, 127)],
       presets: [P("CHOP", [0, 2, 0, 0, 0, 0, 127, 127], [0, 127, 127, 30], 0, 9), P("STUTTER", [0, 1, 0, 0, 1, 0, 90, 110], [0, 127, 127, 12], 0, 10)] },
+    { name: "DCO", titles: ["DCO", "VCF"], edit: [E("WAVE", ["OFF", "PLS", "SAW", "P+S"], 2), D("PW", F.PCT, 0, 127, 0), D("SUB", F.PCT, 0, 127, 0), D("NOIS", F.PCT, 0, 127, 0),
+        D("CUT", F.PCT, 0, 127, 90), D("RES", F.PCT, 0, 127, 0), D("KEY", F.PCT, 0, 127, 64), E("HPF", ["BOOST", "FLAT", "236", "754"], 1)],
+      presets: [P("STRINGS", [3, 28, 0, 0, 85, 0, 108, 0], [86, 89, 86, 100], 0, 5), P("BRASS", [2, 102, 0, 0, 35, 13, 86, 1], [45, 110, 45, 89], 0, 6),
+        P("SYNTH BASS", [1, 57, 102, 50, 32, 0, 35, 0], [0, 91, 0, 94], 0, 2), P("PIANO", [1, 80, 86, 0, 65, 12, 27, 1], [0, 118, 0, 88], 0, 6),
+        P("E PIANO", [1, 0, 0, 0, 16, 31, 35, 3], [29, 123, 43, 100], 0, 6), P("MOVING STR", [3, 20, 14, 0, 77, 20, 111, 1], [65, 124, 88, 93], 0, 5),
+        P("CHOIR", [1, 25, 0, 0, 59, 94, 62, 2], [88, 63, 127, 110], 0, 5), P("FLUTES", [2, 0, 0, 0, 55, 32, 41, 3], [73, 122, 0, 80], 0, 4),
+        P("STRINGS II", [3, 51, 0, 0, 71, 14, 84, 1], [87, 89, 127, 108], 0, 5), P("GUITAR", [3, 65, 0, 0, 12, 15, 30, 1], [0, 111, 54, 89], 0, 3),
+        P("STEEL DRUM", [1, 32, 33, 9, 71, 46, 127, 0], [0, 85, 0, 95], 0, 3), P("SYNTH PAD", [1, 22, 37, 0, 37, 0, 127, 0], [0, 123, 75, 116], 0, 5),
+        P("PLUCK SWP", [3, 34, 125, 0, 60, 111, 98, 2], [0, 125, 0, 118], 0, 3), P("SWEEP", [1, 97, 48, 0, 66, 102, 70, 0], [0, 125, 53, 118], 0, 5),
+        P("DARK SYNTH", [3, 0, 127, 0, 56, 86, 71, 0], [0, 109, 0, 110], 0, 4), P("HARPSI", [1, 27, 35, 0, 127, 127, 86, 3], [0, 115, 0, 89], 0, 3),
+        P("ORCHESTRA", [3, 53, 127, 0, 33, 0, 36, 0], [76, 124, 50, 111], 0, 5), P("DARK ENS", [3, 57, 75, 0, 55, 0, 107, 0], [72, 27, 127, 93], 0, 5),
+        P("CHORUS BEL", [1, 53, 101, 0, 59, 127, 127, 0], [0, 116, 0, 113], 0, 7), P("ETHEREAL", [3, 53, 59, 0, 47, 120, 127, 0], [98, 110, 127, 112], 0, 5)] },   /* (firmware/src/eng_dco.c, dco_presets.h: tools/fm106_presets.py) */
   ];
   const FM6_E = ENG.findIndex((e) => e.name === "FM6"), FM6_OWN = FM6.FACTORY_PK.length, DRUM_E = ENG.findIndex((e) => e.name === "DRUM");
   /* factory PATTERNS[] (engines.c; the device loads them from SAVE > PHRASES, presets only suggest one): absolute
@@ -2426,7 +2439,7 @@ function enumShown(d) {
    the engine numbers. engineOrder(names): the indices of names in that order, "-" (a reserved number) left out; a name
    the list does not know (another firmware) follows in index order */
 const ENGINE_ORDER = ["ANALOG", "FM6", "DIGITAL", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS", "NOISE",
-  "SLICE", "DRUM"];
+  "SLICE", "DRUM", "DCO"];
 function engineOrder(names) {
   const rank = (n) => { const k = ENGINE_ORDER.indexOf(n); return k < 0 ? ENGINE_ORDER.length : k; };
   return (names || []).map((n, i) => i).filter((i) => names[i] !== "-")
