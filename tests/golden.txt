@@ -92,6 +92,14 @@ preset/DCO/16_ORCHESTRA b7c23e05f8aec7f0
 preset/DCO/17_DARK_ENS c539cdd4fa3eed5c
 preset/DCO/18_CHORUS_BEL a1e0749c8fddc1b4
 preset/DCO/19_ETHEREAL e21f792ceaa36f38
+preset/303/00_ACID 200591c8b950aa8c
+preset/303/01_CLASSIC 5b464ac257038d68
+preset/303/02_SQUELCH c655307e725aa1b4
+preset/303/03_SQR_BASS 0a59784ae0afa2b8
+preset/303/04_RUBBER 07cb5dcf5d376218
+preset/303/05_DIST_ACID 4f6a73b78bad3460
+preset/303/06_DEEP f0ea8c98ea43b2e0
+preset/303/07_SCREAM 3eb2a5165e381a2c
 drums/drum_gm_kit a88dcac7803e88d4
 drums/kit_80 e3de7e091a481244
 drums/kit_10 0cd4e95937dc519c

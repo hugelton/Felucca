@@ -439,17 +439,24 @@ static int clean_init(void)
 
     ui_power_on();
     go_home(); frame();
-    lay_combo(B_EDIT, white(LY_CLEAN));
-    ok = ui.confirm == CF_CLEAN_SOUND && LY_CLEAN == LY_INIT + 1u && LY_CLEAN < 16u;
-    key_up(white(LY_CLEAN)); btn_up(B_EDIT); frame();
+    lay_combo(B_EDIT, white(LY_INIT));                  /* (the 303: CLEAN INIT's key is the engines' 15th) */
+    ok = ui.confirm == CF_INIT_SOUND && LY_INIT == NENG_SHOWN && LY_INIT < 16u;
+    key_up(white(LY_INIT)); btn_up(B_EDIT); frame();
     confirm_text(a, b);
-    ok &= str_eq(a, "CLEAN INIT SOUND?") && str_eq(b, "NO FX, NO MOD");
+    ok &= str_eq(a, "INITIALIZE SOUND?") && str_eq(b, "KNOB 1: CLEAN INIT");
+    turn(EN_K1, 1);
+    ok &= ui.confirm == CF_CLEAN_SOUND;
+    turn(EN_K1, -1);
+    ok &= ui.confirm == CF_INIT_SOUND;
+    turn(EN_K1, 1);
+    confirm_text(a, b);
+    ok &= ui.confirm == CF_CLEAN_SOUND && str_eq(a, "CLEAN INIT SOUND?") && str_eq(b, "NO FX, NO MOD");
     dress(TSEL);
     press(B_OCTUP);
     ok &= msg_is("CLEAN INIT") && clean_is(TSEL, TSEL->eng_req, 77, -30);
     go_page(GR_TOOLS);
     ok &= str_eq(help_page(), "[K1]CLEAR[K2]INIT, CLEAN[OCT+]DO") && help_fits(help_page());
-    bad += check("  EDIT + the key after INIT (F5): the dialog \"CLEAN INIT SOUND?\"; TOOLS' HELP hint", ok);
+    bad += check("  EDIT + INIT (G5), KNOB 1 right / left: the dialog \"CLEAN INIT SOUND?\" / INIT; TOOLS' HELP hint", ok);
     return bad;
 }
 

@@ -45,11 +45,16 @@ static void audio_block(int32_t *out, uint32_t n)       /* mix (fx.c), then Q15 
 
 /* Overload: two halves in a row above 85 % (the render plus TIMER5 nested in it), fade one voice over the
  * next block, and one more each half while it lasts. Keep each part's
- * lowest POLY note and MONO / LEGATO / UNISON lead, as the shared budget does. */
+ * lowest POLY note and MONO / LEGATO / UNISON lead, as the shared budget does. A sounding 303 first renders without
+ * oversampling (eng_303.c t303_shed: one a time, before any voice), all back to 2x after SHED_CALM halves in a row
+ * under 65 % (~3 s) */
 static volatile uint8_t shed_req;
 static uint8_t shed_over;                              /* bit k: the half k halves ago was over 85 % */
 #define SHED_TICKS ((HALF_FRAMES * 1000000u / FS) * 85u / 100u * FM1_TICKS_PER_US)   /* 85 % of a half */
+#define CALM_TICKS ((HALF_FRAMES * 1000000u / FS) * 65u / 100u * FM1_TICKS_PER_US)   /* 65 % */
+#define SHED_CALM 1024u
 static uint32_t shed_count;
+static uint16_t shed_calm;                              /* halves in a row under 65 % (t303_calm at SHED_CALM) */
 
 /* end of a half: all = its ticks, TIMER5 nested in it included -> the render alone in us. The deadline sees
  * both; shed after 2 overloaded halves in a row (out of line: keeps the ISR's render loops as they were) */
@@ -58,6 +63,10 @@ static __attribute__((noinline)) uint32_t shed_check(uint32_t all)
     shed_over = (uint8_t)(shed_over << 1 | (all > SHED_TICKS));
     if ((shed_over & 3u) == 3u)
         shed_req = 1;
+    if (all > CALM_TICKS)
+        shed_calm = 0;
+    else if (shed_calm < SHED_CALM && ++shed_calm == SHED_CALM)
+        t303_calm();
     return (all - t5_nested_ticks) / FM1_TICKS_PER_US;
 }
 
@@ -65,6 +74,10 @@ static void shed_voice(void)
 {
     uint32_t p, i;
     voice_t *best = 0;
+    if (t303_shed()) {                                  /* a 303 without oversampling first (eng_303.c) */
+        shed_count++;
+        return;
+    }
     for (p = 0; p < NPART; p++)
         for (i = 0; i < NVOICE; i++) {
             voice_t *v = &trk[p].v[i];

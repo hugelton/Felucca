@@ -176,6 +176,15 @@
 #                   and RANGE and the SUB, no DC, bounded at the corners, a resonance ringing by itself, the HPF's four
 #                   positions, KEY tracking, a click-free retrigger, the 4-voice cap, UNISON's phases, the same state the
 #                   same samples, the cost per voice; demos in build/dco_demo/.
+# 303 (tests/t303_test.c): X0X's Open303 (src/eng_303.c, src/x0x/: X0X's files, their hashes): the engine's block sample
+#                   for sample X0X's bass303 (notes, accents, MONO's SLIDE steps, LEGATO's overlapping keys, releases, a
+#                   cold start), pitch and the bend, an accent, bounded at the corners, the voice's end and the core's
+#                   idle, the overload guard's lite mode, the level (DRV's make-up), the same state the same samples;
+#                   demos in build/t303_demo/. Its floats: the only ones (build.py float_check, FPU in its functions only).
+# TB-3PO (tests/tb3po_test.c + tests/ref/: X0X's float generator, its own unit): the integer port (src/tb3po.c) against
+#                   it: every draw's rounding, 40000 lines, MUTATE chains, new seeds; the steps (a MUTATE writes only what
+#                   it changes), a project's FM6 area; the UI (ARP on a 303 track: GENERATE / SCALE, OCT+ / OCT-, the
+#                   knobs, undo, a song refuses), the arp inert there, auto MUTATE in the sequencer, a project round trip.
 # DIGITAL -> FM6 (tests/fm4_test.c, built with FELUCCA_FM4=1): the retired four-operator engine against its conversion
 #                   (src/fm4_convert.c): routes and carriers per algorithm, the presets' PTCH, and the sound (pitch,
 #                   centroid, RMS envelope) of its presets and algorithms; demos in build/fm4_demo/. tests/digital_test.c
@@ -435,6 +444,14 @@ if [ -f build/gen/felucca_tables.h ]; then
     mkdir -p build/dco_demo
     run "DCO: pitch, RANGE, SUB, DC, bounds, self-oscillation, HPF, KEY, retrigger, voices, UNISON, determinism, cost, demos" \
         "$OUT/dco_test" build/dco_demo
+    $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -o "$OUT/t303_test" tests/t303_test.c -lm
+    mkdir -p build/t303_demo
+    run "303: X0X's bass303 sample for sample (slides, accents), pitch, bend, bounds, voice end, lite, level, determinism, demos" \
+        "$OUT/t303_test" build/t303_demo
+    $CC -O2 -w -ffp-contract=off -Ibuild/gen -Ifirmware/src -o "$OUT/tb3po_test" tests/tb3po_test.c tests/ref/x0x_tb3po_ref.c -lm
+    run "TB-3PO: X0X's lines (every draw, 40000 lines, MUTATE chains), the steps, projects, the UI, auto MUTATE" "$OUT/tb3po_test"
+    $CC -w -DFELUCCA_303=0 -Ibuild/gen -Ifirmware/src -o "$OUT/ui_test_no303" tests/ui_test.c -lm
+    run "UI, a FELUCCA_303=0 build: engine 15 reserved, the EDIT layer's keys as before the 303" "$OUT/ui_test_no303"
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/fm6_test" tests/fm6_test.c -lm
     mkdir -p build/fm6_demo
     run "FM6: algorithms, envelopes, retrigger, DC, clipping, macros, patch formats, voices, cost, demos" "$OUT/fm6_test" build/fm6_demo

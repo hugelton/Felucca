@@ -82,6 +82,7 @@ static void host_tracks_init(void)                /* as felucca_init: defaults, 
             trk[k].step[i].time = ST_REST;
     }
     song.master_q12 = 4096;
+    tb3_reset();                                  /* TB-3PO: X0X's defaults (main.c felucca_init) */
 }
 
 /* the factory preset as ui.c apply_preset_to sets it (sound, sends; not the steps, not the track's own:

@@ -90,7 +90,7 @@ watches (v2, `WATCH`), the device also sends push frames (cmds 23, 24, 26) at an
 | string | ASCII bytes, ended by a 0 byte |
 | scope | 0 = parameter of the selected track (`P_*`, 0..P_COUNT−1); 1 = global parameter (`G_*`, 0..G_COUNT−1) |
 | track | 0..3: tracks 1..4 (synth parts) |
-| engine byte | 0..NENGINES−1 (firmware before 1.0: NENGINES = its drum track, no engine). The numbers are fixed, new engines are appended: 0 ANALOG, 1 reserved (DIGITAL before 1.0: see below), 2 PHASE, 3 LOFI, 4 SAMPLE, 5 VOICE, 6 TRIO, 7 WHEEL, 8 GRAIN, 9 PHYS, 10 DRUM, 11 NOISE, 12 FM6, 13 SLICE, 14 DCO (NENGINES 15; 14 up to 1.6.1; a build with `FELUCCA_SLICE=0` reserves 13, one with `FELUCCA_FM4=1` 14). The device and the editor list them in another order (ANALOG FM6 PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS NOISE SLICE DRUM DCO: `ENGINE_ORDER`); the numbers stay |
+| engine byte | 0..NENGINES−1 (firmware before 1.0: NENGINES = its drum track, no engine). The numbers are fixed, new engines are appended: 0 ANALOG, 1 reserved (DIGITAL before 1.0: see below), 2 PHASE, 3 LOFI, 4 SAMPLE, 5 VOICE, 6 TRIO, 7 WHEEL, 8 GRAIN, 9 PHYS, 10 DRUM, 11 NOISE, 12 FM6, 13 SLICE, 14 DCO, 15 303 (NENGINES 16; 15 with DCO alone, 14 up to 1.6.1; a build with `FELUCCA_SLICE=0` reserves 13, one with `FELUCCA_FM4=1` 14 and 15, one with `FELUCCA_303=0` 15). The device and the editor list them in another order (ANALOG FM6 PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS NOISE SLICE DRUM DCO 303: `ENGINE_ORDER`); the numbers stay |
 
 The engine parameters are `P_E0..P_E7`: P_COUNT−8 .. P_COUNT−1 (103..110 since 1.5; 96..103 in 1.2 .. 1.4; 91..98 in
 1.1), and `INFO` gives `P_E0`.
@@ -824,6 +824,26 @@ unchanged.
   Firmware up to 1.6.1 refuses a PER5 object (rc 1) and reads a PER5 record in flash as no settings (its defaults).
 - The user-slot marker of the favourites (`FAV_GET` / `FAV_SET`, engine `NENGINES`) is 15 now: take NENGINES from `INFO`.
 
+## After 1.6.1: the 303 engine, TB-3PO
+
+No new command or INFO tag; `INFO` says NENGINES 16, and `DESC` describes the new engine as always. P_COUNT and P_E0 are
+unchanged; the settings record stays PER5 (its favourites already have engine 15's row).
+
+- **Engine 15, 303**: X0X's Open303 (Robin Schmidt; schwung-303's Devilfish ranges and drive): E1..E8 CUT, RES, ENV (env
+  mod), DCY, ACC, WAVE (SAW SQR), DRV, DTYP (SOFT RAT); 8 factory presets; one voice a track (POLY plays as MONO). Its
+  envelopes are the 303's own: ATK DEC SUS REL and the ENV amounts do nothing on a 303 track; the track's `GLIDE` (5) is
+  the SLIDE time (0: the stock 60 ms). A step's SLD slides, an ACC step (or a note over velocity 110) accents. Last in
+  `ENGINE_ORDER`. Reserved (silent, never stored) with `FELUCCA_303=0` or `FELUCCA_FM4=1`. Firmware before it (NENGINES
+  15 or 14) refuses a 303 engine byte: `UP_PUT` rc 1, a project holding one shows EMPTY there, a user preset of one reads
+  as an empty slot.
+- **ARP on a 303 track is TB-3PO** (the line generator, on the device only: no protocol of its own). The track's ARP
+  parameters (`AMODE` .. `AORDR`) are kept but do nothing while it is a 303 track; another engine plays them again.
+  TB-3PO writes the track's steps as any edit does (`STEP_GET` reads them; a rest it wrote keeps its note in note 1 with
+  0 notes, as any cleared step).
+- **A project's FM6 area of a 303 track** (`FM6_GET` of that track after loading it: the init patch): it holds TB-3PO's
+  settings instead of an FM6 patch: "TB3P", version 1, DENS ACCENT SLIDE OCTS ROOT SCALE OCTAVE MUTATE, the seed in five
+  7-bit bytes, zeros (every byte 0..127, as the format asks). A full backup carries it as it is.
+
 ## v7: full backup (65-67)
 
 INFO advertises `42 01 caps`: bit 0 = `BACKUP_LIST` / `BACKUP_GET` (read), bit 1 = `BACKUP_PUT` (restore);
@@ -1053,7 +1073,7 @@ HI-CON NIGHT MONO; 1.0.2: GREY is the MONO of 1.0.1, MONO a new black and white 
 fields are 127.
 Both u28 signatures are four least-significant-first 7-bit bytes; compare them
 to refresh changed favorites and user slots. Factory references use stable
-engine/preset ids; engine NENGINES (from `INFO`: 15, 14 up to 1.6.1) denotes a user slot. An empty user slot
+engine/preset ids; engine NENGINES (from `INFO`: 16; 15 with DCO alone, 14 up to 1.6.1) denotes a user slot. An empty user slot
 cannot be marked. Factory DRUM sounds use the same favorite path.
 
 rc 0 = applied and saved; 1 = invalid arguments; 2 = unsupported feature;

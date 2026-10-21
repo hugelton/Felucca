@@ -25,6 +25,10 @@ the build:
 - `.ram_text` (code that runs with the flash off) must contain no `call`; `.c1_text` (second core) may only call
   through a register; nothing may reference chip ROM addresses.
 - RAM headroom ≥ 4 KiB of `.bss`, pool headroom ≥ 8 KiB, image fits the app slot (`firmware/app.ld`).
+- **Float only in the 303 engine.** The app is built for the FPU (`build.py` `FPU`, which changes no integer code)
+  because `eng_303.c` wraps X0X's float Open303 (`firmware/src/x0x/`, kept byte for byte as X0X has it:
+  `tests/t303_test.c` checks their hashes). `float` / `double` anywhere else fails the build (`float_check`), and so does
+  an FPU instruction outside the 303's functions. TB-3PO (`tb3po.c`) is an integer port with X0X's exact lines.
 - **All hardware register access lives in `firmware/hal/`.** In `src/`, `engines/src/` and `loader/`: no volatile
   pointer casts (except `*(volatile T *)&obj`), no literal register/window addresses, no inline asm (except
   `RING_PUBLISH()`), no HAL register macros. Add a `hal/` helper instead.
@@ -88,9 +92,11 @@ sharing a budget of 8 voices (`voice.c`). Engines implement the interface in
 `firmware/engines/src/felucca_engine.h`. ANALOG, LOFI, TRIO, WHEEL, NOISE and the shared `dsp.c` live in the
 **Felucca-Engines submodule (MIT)**: changes to them belong in that repository. The others (`eng_*.c` here) are
 GPL. DIGITAL (`FELUCCA_FM4`) is retired: engine 1 is reserved and its sounds load as FM6 via `fm4_convert.c`.
-Engine numbers are append-only (SLICE 13, DCO 14); `NENGINES` is 15 in every build: a build without SLICE or with
-`FELUCCA_FM4=1` reserves its slot instead (`engines.c` `eng_ok` / `eng_stored_ok`), and the EDIT layer has keys for at
-most 14 engines (`ui_layer.c` `LY_CLEAN < 16`).
+Engine numbers are append-only (SLICE 13, DCO 14, 303 15); `NENGINES` is 16 in every build: a build without SLICE,
+with `FELUCCA_303=0` or with `FELUCCA_FM4=1` reserves its slot instead (`engines.c` `eng_ok` / `eng_stored_ok`), and
+the EDIT layer has keys for at most 15 engines plus INIT (`ui_layer.c` `LY_INIT < 16`; CLEAN INIT is the INIT dialog's
+KNOB 1). On a 303 track ARP opens TB-3PO (`ui_tb3po.c`: GENERATE / SCALE, OCT+ a new line, OCT- a MUTATE) instead of
+the arpeggiator (`seq.c` `arp_mode`); a project keeps its settings in that track's FM6 area (`tb3po.c` `tb3_pack`).
 
 **Stored formats and compatibility.** Projects (FUN1..FUN10, `project.c`), user presets (`upreset.c`), settings,
 the FM6 voice bank and the full backup live in NOR flash (`storage.c`, A/B copies, tested against torn writes and

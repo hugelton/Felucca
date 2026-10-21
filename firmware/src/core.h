@@ -28,13 +28,19 @@
                                             * second core (mod.c, voice.c SPREAD, eng_formant.c): one each with two cores,
                                             * one for all with one, as up to 1.6 */
 #define C1_PI(t) ((uint32_t)((t) - trk) % C1_NP)   /* a part's copy */
-#define NENGINES 15              /* the engine numbers (engines.c ENGINES[]: append-only): SLICE 13 (FELUCCA_SLICE=0: a
-                                  * reserved slot, so DCO keeps its number), DCO 14 */
+#ifndef FELUCCA_303
+#define FELUCCA_303 1            /* the 303 engine (eng_303.c, X0X's Open303), engine 15; FELUCCA_303=0: a reserved slot */
+#endif
+#define NENGINES 16              /* the engine numbers (engines.c ENGINES[]: append-only): SLICE 13 (FELUCCA_SLICE=0: a
+                                  * reserved slot, so DCO keeps its number), DCO 14, 303 15 */
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
 #define ENGI_SLICE 13u           /* reserved with FELUCCA_SLICE=0: never selectable, never stored (eng_stored_ok) */
+#define ENGI_303 15u             /* reserved with FELUCCA_303=0 (and FELUCCA_FM4), as SLICE */
+#define T303_ON (FELUCCA_303 && !FELUCCA_FM4)   /* the 303 can be picked */
 /* the engines one can pick: PRESETS, the EDIT layer, the editor, in the display order of engines.c ENGINE_ORDER. DCO
- * (14) not with FELUCCA_FM4 (a test build of the retired DIGITAL: the EDIT layer's keys hold 14 engines at most) */
-#define NENG_SHOWN (NENGINES - !FELUCCA_FM4 - !FELUCCA_SLICE - FELUCCA_FM4)
+ * (14) and 303 (15) not with FELUCCA_FM4 (a test build of the retired DIGITAL: the EDIT layer's keys hold 15 engines at
+ * most, ui_layer.c) */
+#define NENG_SHOWN (NENGINES - !FELUCCA_FM4 - !FELUCCA_SLICE - FELUCCA_FM4 - !T303_ON)
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 
 /* ------------------------------------------------------- parameters --- */

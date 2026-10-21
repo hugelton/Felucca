@@ -224,6 +224,7 @@ static const uint8_t MIDI_CC_ENG[NENGINES] = {
     0x80, 0x30, 0x30, 0x34, 0x30,                     /* GRAIN TONE, PHYS BRIT, DRUM TONE, NOISE FREQ RES, FM6 MLVL */
     FELUCCA_SLICE ? 0x80 : 0x00,                      /* SLICE TONE (FELUCCA_SLICE=0: reserved) */
     0x56,                                             /* DCO CUT RES */
+    T303_ON ? 0x12 : 0x00,                            /* 303 CUT RES (reserved without it) */
 };
 /* a CC sets parameter id of track t as a knob would: 0..127 over its range */
 static void midi_cc_set(track_t *t, uint32_t id, uint32_t value)

@@ -23,6 +23,7 @@ FUNCS = ["analog_render", "digital_render", "digital_render_legacy", "digital_re
          "slicer_track",
          "slice_render", "slc_rev",                          # SLICE (eng_slice.c): the render, the reverse windows
          "dco_render",                                      # DCO (eng_dco.c, dco_dsp.c)
+         "t303_block", "t303_render", "bass303_render",     # 303 (eng_303.c; X0X's run / drive_block inlined: x0x/bass303.c)
          "cho_bbd",                                         # CHORUS TYPE I, II, I+II (fx.c)
          "fm1_alnk0_irq", "fm1_timer5_irq",               # the audio ISR; TIMER5: the key / LED scan (hal/fm1_input.h)
          "mix_part",                                        # a part's block (fx.c), on either core since the second
@@ -51,12 +52,13 @@ budget = sys.argv[2] if len(sys.argv) > 2 else "tests/target_budget.txt"
 LABEL = re.compile(r"^([A-Za-z_][A-Za-z_0-9.]*):$")
 INSN = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*(.*)$")
 TARGET = re.compile(r"goto -?\d+ <[^>]*: ([0-9a-f]+) >")
+FPU_OP = re.compile(r"3f [ef]5 $")
 
 
 def functions(path):
     """{name: [(addr, text)]}: a function runs to the next label not starting with '.' (the compiler's
     jump-table labels are inside functions); jump-table data ('< n : 0x.. >') is left out"""
-    out, cur = {}, None
+    out, cur, fpu = {}, None, False
     with open(path) as f:
         for line in f:
             m = LABEL.match(line.strip())
@@ -66,6 +68,14 @@ def functions(path):
                     cur = out.setdefault(name, []) if name in FUNCS else None
                 continue
             m = INSN.match(line)
+            if m and fpu:               # the FPU instruction's second half, which objdump reads as one of its own
+                fpu = False
+                continue
+            if m and FPU_OP.match(m.group(2)) and "unknown" in m.group(3):   # an FPU instruction (the 303's float code, src/eng_303.c): 4 bytes,
+                fpu = True              # prefix 3f e5 / 3f f5, unknown to objdump: one instruction
+                if cur is not None:
+                    cur.append((int(m.group(1), 16), "fpu"))
+                continue
             if cur is not None and m and not m.group(3).lstrip().startswith("<"):
                 cur.append((int(m.group(1), 16), m.group(3).strip()))
     return out

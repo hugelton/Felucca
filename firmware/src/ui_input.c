@@ -146,6 +146,8 @@ static uint32_t oct_leds(void)
         return 1u | (ui.confirm || act_ready() ? OCT_BREATH : 0u);
     if (mom.n && mom_down())                            /* MOMENTARY: OCT+ keeps the changes */
         return (song.octave < 0 ? 1u : 0u) | OCT_BREATH;
+    if (tb3_on())                                       /* TB-3PO: OCT+ a new line, OCT- a MUTATE (ui_tb3po.c) */
+        return chain_busy() ? 0u : OCT_BREATH | OCT_BREATH_DN;
     return (song.octave < 0 ? 1u : 0u) | (song.octave > 0 ? 2u : 0u);
 }
 
@@ -210,7 +212,7 @@ static uint32_t arp_led(void)
 {
     uint32_t k, on = 0, b = beat_samples();
     for (k = 0; k < NPART; k++)
-        on |= trk[k].p[P_AMODE] && trk[k].nheld;
+        on |= arp_mode(&trk[k]) && trk[k].nheld;
     return !on ? 2u : beat_pos < (beat_n ? b / 6u : b / 2u);
 }
 
@@ -1037,6 +1039,10 @@ static void edit_param(uint32_t slot, int32_t steps)
         fop_knob(slot, steps);
         return;
     }
+    if (tb3_graph(pg->graph)) {                          /* TB-3PO: its settings, not the track's (ui_tb3po.c) */
+        tb3_knob(slot, steps);
+        return;
+    }
     if (pg->graph == GR_MOD && slot == 0u) {             /* MOD: KNOB 1 the slot, 2..4 its SRC DST AMT */
         mod_ui_slot = (uint8_t)clamp((int32_t)mod_ui_slot + (steps > 0 ? 1 : -1), 0, 3);
         return;
@@ -1513,7 +1519,7 @@ static void ui_input(void)
     if (((pressed >> panel.btn[B_REC]) & 1u) && ui.ly == LAYER_REC)
         ui.rec_t0 |= 2u;                                /* (REC is its layer's button now: its tap is layer_tap's) */
     layer_oct_open(pressed);                            /* (OCT± with a SET layer's button down: it opens now) */
-    oct = oct_taps(pressed, ui.menu || ui.confirm || act_cols() || name_on() || layer_set_open() || ui.ml.on);
+    oct = oct_taps(pressed, ui.menu || ui.confirm || act_cols() || name_on() || layer_set_open() || ui.ml.on || tb3_on());
     oct = layer_oct(pressed, oct);                      /* (a SET layer's OCT-: put back) */
     layer_masks();                                      /* seq.c: keys pressed with a layer's button are its own */
     lay = layer_held();
@@ -1660,6 +1666,10 @@ static void ui_input(void)
         } else if (oct & 1u) {
             ui.confirm = 0;
             ui.force = 1;
+        } else if ((ui.confirm == CF_INIT_SOUND || ui.confirm == CF_CLEAN_SOUND) && (s = panel_enc(EN_K1)) != 0) {
+            ui.confirm = s > 0 ? CF_CLEAN_SOUND : CF_INIT_SOUND;   /* KNOB 1: right CLEAN INIT, left INIT (the EDIT
+                                                         * layer's INIT; CLEAN had its own key up to 1.6.1) */
+            ui.force = 1;
         }
         ui.pg_down = 0;
         enc_drop();
@@ -1697,8 +1707,8 @@ static void ui_input(void)
         case B_OCTDN:
         case B_OCTUP: {
             uint32_t both = (1u << panel.btn[B_OCTDN]) | (1u << panel.btn[B_OCTUP]);
-            if (act_cols() || layer_set_open() || ui.ml.on)   /* action pages: enter / back (below); SET layers: OCT-; */
-                break;                                  /* MIDI LEARN: clear / done (below) */
+            if (act_cols() || layer_set_open() || ui.ml.on || tb3_on())   /* action pages: enter / back (below); */
+                break;                                  /* SET layers: OCT-; MIDI LEARN: clear / done; TB-3PO (below) */
             if ((fm1_in.buttons & both) == both)
                 song.octave = 0;
             else
@@ -1725,6 +1735,8 @@ static void ui_input(void)
             go_home();
     } else if (ui.ml.on && oct) {                          /* MIDI LEARN: OCT- clears the picked CC, OCT+ done */
         ml_oct(oct);
+    } else if (tb3_on() && oct) {                       /* TB-3PO: OCT+ a new line, OCT- a MUTATE (ui_tb3po.c) */
+        tb3_oct(oct);
     }
     song.grid = (uint8_t)keys_mode();                 /* (seq.c: the keys are the grid's) */
 #if FELUCCA_SLICE

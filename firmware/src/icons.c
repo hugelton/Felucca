@@ -156,6 +156,9 @@ static const icon_map_t ICON_MAP[] = {
     {"MLVL", ICON_MOD}, {"MRAT", ICON_RATIO}, {"MEG", ICON_DECAY}, {"VMOD", ICON_ACCENT}, {"DTUN", ICON_DETUNE},
     {"SLOT", ICON_LOAD},                                                    /* FM6 (ALG, FB: above) */
     {"KEY", ICON_KEYTRACK}, {"HPF", ICON_CUTOFF}, {"RANGE", ICON_OCTAVE},   /* DCO (WAVE PW SUB NOIS CUT RES: above) */
+    {"DTYP", ICON_DRIVE},                                                   /* 303 (CUT RES ENV DCY ACC WAVE DRV: above) */
+    {"ACCENT", ICON_ACCENT}, {"SLIDE", ICON_SLIDE}, {"OCTS", ICON_OCTAVE}, {"SCALE", ICON_SCALE},   /* TB-3PO (DENS */
+    {"OCTAVE", ICON_OCTAVE}, {"MUTATE", ICON_PROB},                                                 /* ROOT: above) */
     /* fixed columns drawn by ui_draw.c (STEP page, preset browser) */
     {"NOTE", ICON_PITCH}, {"STEP", ICON_STEPS}, {"FLAG", ICON_ACCENT}, {"ACC", ICON_ACCENT}, {"LANE", ICON_DRUM}, {"HIT", ICON_GATE}, {"SLD", ICON_SLIDE},
     {"TRACK", ICON_MIX},                  /* TRACKS page (LEVEL, LEN, PAN: above) */
@@ -256,6 +259,7 @@ static uint32_t engine_icon(const char *name)
         {"NOISE", ICON_NOISE},
         {"FM6", ICON_MOD},                    /* (symbol_modular: six operators patched; a glyph of its own wanted) */
         {"DCO", ICON_PULSE},                  /* (the Juno's pulse and PWM) */
+        {"303", ICON_SLIDE},                  /* (the acid line's slides) */
     };
     uint32_t i;
     for (i = 0; i < sizeof M / sizeof M[0]; i++)

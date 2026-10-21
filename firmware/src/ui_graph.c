@@ -256,6 +256,72 @@ static void graph_roll(const track_t *t, uint16_t c)
         }
     }
 }
+/* ARP on a 303 track (TB-3PO, ui_tb3po.c): the whole line (LEN steps across the panel, the beats' lines), its notes as
+ * bars from the lowest to the highest of them (an octave at least), an ACC one taller in TEXT, a SLD drawn into the
+ * next note, a TIE the bar on; the step playing; over it the key and scale the next line is in and the line's seed */
+#define TB3_X0 10                                   /* the line: x 10 .. 230, y 24 .. 114 */
+#define TB3_W 220
+#define TB3_Y0 24
+#define TB3_H 90
+static void graph_tb3(const track_t *t, uint16_t c)
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    const tb3_cfg_t *g = &tb3_cfg[trk_index(t)];
+    const step_t *s = t->step;
+    uint32_t len = (uint32_t)clamp(t->p[P_SLEN], 1, NSTEP), i, j, lo = 127, hi = 0, prev = 0xFFu;
+    int32_t span;
+    char b[16];
+    cv_oy = 0;
+    str_cpy(b, N_NOTE[g->root % 12u], sizeof b);
+    str_cpy(b + str_len(b), " ", 2);
+    str_cpy(b + str_len(b), TB3_SCALE_NAMES[g->scale % TB3_NSCALES], 6);
+    cv_text(TB3_X0, 4, &AF_S, b, T_MID);
+    str_cpy(b, "SEED ", sizeof b);
+    for (j = 0; j < 4u; j++)
+        b[5u + j] = HEX[(g->seed >> (12u - 4u * j)) & 15u];
+    b[9] = 0;
+    cv_text_r(TB3_X0 + TB3_W, 4, &AF_S, b, T_MID, T_SURF);
+    for (i = 0; i < len; i++)                         /* the notes' range (a REST's kept note left out) */
+        if (s[i].time != ST_REST && s[i].n) {
+            uint32_t n = s[i].note[0] & 127u;
+            lo = n < lo ? n : lo;
+            hi = n > hi ? n : hi;
+        }
+    if (lo > hi)
+        lo = hi = 45;
+    if (hi - lo < 12u)
+        hi = lo + 12u > 127u ? 127u : lo + 12u;
+    span = (int32_t)(hi - lo);
+    for (i = 0; i <= len; i += 4u)                    /* the beats */
+        cv_rect(TB3_X0 + (int32_t)(i * TB3_W / len), TB3_Y0 - 2, 1, TB3_H + 4, i % 16u ? T_GRID : T_RAISE);
+    for (i = 0; i < len; i++) {
+        const step_t *st = &s[i];
+        int32_t x = TB3_X0 + (int32_t)(i * TB3_W / len), w = TB3_X0 + (int32_t)((i + 1u) * TB3_W / len) - x, y;
+        uint32_t n;
+        if (st->time == ST_TIE && prev != 0xFFu)
+            n = prev;                                 /* a TIE: the note before, on */
+        else if (st->time == ST_NOTE && st->n)
+            n = st->note[0] & 127u;
+        else {
+            prev = 0xFFu;
+            continue;
+        }
+        prev = n;
+        y = TB3_Y0 + (int32_t)(hi - (n > hi ? hi : n < lo ? lo : n)) * (TB3_H - 6) / span;
+        if ((st->flags & SF_ACCENT) && st->time == ST_NOTE)
+            cv_rect(x + 1, y, w > 2 ? w - 1 : 1, 6, T_TEXT);
+        else
+            cv_rect(st->time == ST_TIE ? x : x + 1, y + 1, w > 2 ? w - (st->time == ST_TIE ? 0 : 1) : 1, 4, c);
+        if ((st->flags & SF_SLIDE) && i + 1u < len && s[i + 1u].time == ST_NOTE && s[i + 1u].n) {
+            uint32_t m = s[i + 1u].note[0] & 127u;
+            int32_t ny = TB3_Y0 + (int32_t)(hi - (m > hi ? hi : m < lo ? lo : m)) * (TB3_H - 6) / span;
+            cv_line(x + w - 1, y + 3, x + w + 1, ny + 3, T_TEXT);   /* the slide into the next note */
+        }
+    }
+    if (song.playing && t->seq_idx < len)             /* the step playing */
+        cv_rect(TB3_X0 + (int32_t)(t->seq_idx * TB3_W / len), TB3_Y0 - 2, 1, TB3_H + 4, T_ACCENT);
+}
+
 /* SEQ > STEP on a DRUM track: the grid, 8 lanes x the 16 steps of the page shown. Lanes by their two-letter
  * names (BD SD CP CH OH TM RS CB; CG CL CY on the other kits). A hit is a rounded square (accented: the
  * accent; a RATCH step's: its 2..4 parts as bars), an empty step a dot (brighter on the beats and on the selected lane); the selected lane is
@@ -1219,6 +1285,11 @@ static uint32_t graph_signature(void)
     }
     if (pg->graph == GR_MOD)
         h ^= (mod_ui_slot + 1u) * 40503u;
+    if (pg->graph == GR_TB3GEN || pg->graph == GR_TB3SCL) {   /* TB-3PO: the line, its settings, the step playing */
+        const tb3_cfg_t *g = &tb3_cfg[trk_index(t)];
+        h ^= steps_hash(t) + (song.playing ? t->seq_idx + 1u : 0u) * 31u + g->seed * 2654435761u + tb3_auto_n * 7919u;
+        h = (h ^ (g->root + 12u * g->scale)) * 16777619u;
+    }
     if (pg->graph == GR_SLCR && t->p[P_SLCR])        /* the SLICER's step playing */
         h ^= (sl[song.sel].idx + 1u) * 2654435761u;
     if (pg->graph == GR_SLOTS) {                     /* (a checksum over each slot) */
@@ -2341,6 +2412,10 @@ static void draw_graph(void)
             break;
         case GR_FMENV:
             if (fop_ok()) graph_fm6env(t, c);
+            break;
+        case GR_TB3GEN:
+        case GR_TB3SCL:
+            graph_tb3(t, c);                         /* (ARP on a 303 track: TB-3PO's line) */
             break;
         default:
             if (pg->scope == SC_ENGINE && ENGINES[t->eng_req % NENGINES] == &ENG_WHEEL) graph_wheel(t, c);

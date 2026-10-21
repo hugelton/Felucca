@@ -425,6 +425,8 @@ static uint32_t layer_btn(void);
  * track's (its patch's operators, ui_fm6op.c) */
 static int page_visible(uint32_t i)
 {
+    if (PAGES[i].fam == FAM_ARP)                      /* ARP: TB-3PO's pages on a 303 track, the arp's on another */
+        return (PAGES[i].graph == GR_TB3GEN || PAGES[i].graph == GR_TB3SCL) == (TSEL->eng_req % NENGINES == ENGI_303);
     if (PAGES[i].scope == SC_TRACK && PAGES[i].id[0] >= P_LN0 && PAGES[i].id[0] <= P_LN7)
         return TSEL->eng_req % NENGINES == ENGI_DRUM;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): ANALOG's */
@@ -444,9 +446,12 @@ static int page_visible(uint32_t i)
              PAGES[i].id[0] <= P_FM4_LEVEL) || (FELUCCA_FM4 && TSEL->eng_req % NENGINES == ENGI_DIGITAL);
 }
 
-static uint32_t page_first(uint32_t fam)
+static uint32_t page_first(uint32_t fam)        /* the family's first page shown (ARP on a 303 track: GENERATE) */
 {
     uint32_t i;
+    for (i = 0; i < NPAGES; i++)
+        if (PAGES[i].fam == fam && page_visible(i))
+            return i;
     for (i = 0; i < NPAGES; i++)
         if (PAGES[i].fam == fam)
             return i;
@@ -1763,6 +1768,7 @@ static void track_select(uint32_t i)
 #include "ui_slice.c"                             /* EDIT > SLICES: SLICE's slices by hand (an action page too) */
 #include "ui_events.c"                            /* SEQ > AUTOMATION: locks, events, CHANCE, RATCH as a list (an action page) */
 #include "midi_learn.c"                           /* MIDI LEARN (1.5): GLO + D4, a knob, a CC */
+#include "ui_tb3po.c"                             /* ARP on a 303 track: TB-3PO's GENERATE and SCALE (tb3po.c) */
 
 /* ---------------------------------------------------- action pages --- */
 /* Pages whose purpose is an action (SAVE > USER, PHRASES, PROJECT, TOOLS, EDIT > SLICES, SEQ > AUTOMATION): the knobs pick,

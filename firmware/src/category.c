@@ -38,6 +38,7 @@ static const char *const PRESET_CAT[16] = {
     "PLBKKPPLPUUPUFLKPPUP",      /* 14 DCO: STRINGS, BRASS, SYNTH BASS, PIANO, E PIANO, MOVING STR, CHOIR, FLUTES,
                                   * STRINGS II, GUITAR, STEEL DRUM, SYNTH PAD, PLUCK SWP, SWEEP, DARK SYNTH, HARPSI,
                                   * ORCHESTRA, DARK ENS, CHORUS BEL, ETHEREAL (tools/fm106_presets.py) */
+    "BBBBBBBL",                  /* 15 303: ACID, CLASSIC, SQUELCH, SQR BASS, RUBBER, DIST ACID, DEEP, SCREAM */
 };
 static uint32_t preset_cat(uint32_t e, uint32_t k)    /* factory preset k of engine e */
 {

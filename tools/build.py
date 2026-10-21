@@ -33,6 +33,7 @@ LDR = OUT / "loader"
 sys.path.insert(0, str(SRC / "tools"))
 import fm1pkg_make  # noqa: E402
 import lz4blk  # noqa: E402
+import size_fns  # noqa: E402
 
 APP_XIP = 0x02000120                # app.bin offset 0 in the XIP map; the SPL jumps here
 APP_SLOT = fm1pkg_make.APP_SLOT
@@ -40,6 +41,11 @@ LOADER_LOAD = 0x01C0A800
 LOADER_NAME = b"usb_hid_ota.bin"    # the file name the SPL looks for
 DOCKER_IMAGE = os.environ.get("JIELI_DOCKER_IMAGE", "debian:bookworm-slim")
 CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-function"]
+# the app: the single-precision FPU, for the 303 engine's float DSP (firmware/src/eng_303.c, x0x/). Measured: the flags
+# change no instruction of the integer code (the image is byte for byte the same without a float in it); no fused
+# multiply-add, so the host tests' renders (-ffp-contract=off too) are the device's. Only the 303 may use float
+# (float_check): its values live in the general registers, which the ISR entry saves (hal/fm1_isr.S)
+FPU = ["-mcpu=r3", "-mfprev1", "-ffp-contract=off"]
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
 # SDK files of AC79NN_SDK_V1.2.1_2023-12-13 (the tested version)
@@ -191,10 +197,10 @@ def ld_regions():
 
 
 def build_app():
-    flags = [*CFLAGS, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
+    flags = [*CFLAGS, *FPU, "-Ifirmware/hal", "-Ifirmware/src", "-Ibuild/gen"]
     for flag in ("FELUCCA_FLASH", "FELUCCA_OTA", "FELUCCA_OTA_DRYRUN", "FELUCCA_OTA_RAMONLY", "FELUCCA_CDC",
                  "FELUCCA_UART", "FELUCCA_UAC", "FELUCCA_UAC_TONE", "FELUCCA_UAC_48K", "FELUCCA_ICONS", "FELUCCA_SLICE", "FELUCCA_FM4",
-                 "FELUCCA_CDC_DEFAULT", "FELUCCA_UAC_AS_FIRST", "FELUCCA_CPU2"):
+                 "FELUCCA_CDC_DEFAULT", "FELUCCA_UAC_AS_FIRST", "FELUCCA_CPU2", "FELUCCA_303"):
         v = os.environ.get(flag)    # unset: the default in firmware/src/felucca.c
         if v in ("0", "1"):
             flags.append(f"-D{flag}={v}")
@@ -307,6 +313,23 @@ def check(img, syms, dis, rt):
                 errors.append(f"reference to ROM address {val:#010x}")
     if len(img) > APP_SLOT:
         errors.append(f"image {len(img)} B exceeds the app slot")
+    # FPU instructions (4 bytes, prefix 3f e5 / 3f f5, which objdump does not know) only in the 303 engine's functions:
+    # the float code runs in the audio ISR and the second core's job only (float_check, the sources' side)
+    fpu_ok = {n for f in [FW / "src" / "eng_303.c", *(FW / "src" / "x0x").glob("*.[ch]")]
+              for n in size_fns.definitions(f.read_text())}
+    fn, fpu_fns, fpu_n = None, set(), 0
+    for ln in dis.splitlines():
+        mm = re.match(r"^([A-Za-z_][A-Za-z_0-9.]*):$", ln)
+        if mm:
+            fn = mm.group(1)
+        elif re.match(r"^\s*[0-9a-f]+:\s+3f [ef]5 \s+<unknown", ln):
+            fpu_n += 1
+            if fn not in fpu_ok and not (fn or "").startswith(("b303_", "bass303_", "t303_")):
+                fpu_fns.add(fn)
+    if fpu_fns:
+        errors.append(f"FPU instructions outside the 303 engine: {sorted(fpu_fns)[:4]}")
+    else:
+        notes.append(f"FPU: {fpu_n} instructions, the 303 engine's only")
 
     def sym(name):
         mm = re.search(r"^([0-9a-f]+) .*\s" + name + r"$", syms, re.M)
@@ -371,6 +394,30 @@ def mmio_check():
     return errors
 
 
+# Float only in the 303 engine (eng_303.c and the X0X files it includes, x0x/): no other file may name float or double
+# (comments stripped; a double constant folded at compile time, e.g. fx.c HL_LFO, names neither). The main loop and the
+# other engines stay integer: a float in an interrupt and the main loop at once would need the FPU's state saved
+# (soft-float helpers are no risk: nothing provides them, the link would fail)
+FLOAT_OK = {"eng_303.c"}
+FLOAT_RX = re.compile(r"\b(?:float|double)\b")
+
+
+def float_check():
+    def strip(s):
+        s = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), s, flags=re.S)
+        s = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', s)
+        return re.sub(r"//[^\n]*", "", s)
+    errors = []
+    for f in sorted([*(FW / "src").glob("*.[ch]"), *(FW / "engines" / "src").glob("*.[ch]"), *(FW / "hal").glob("*.h"),
+                     *(FW / "loader").glob("*.c")]):
+        if f.name in FLOAT_OK:
+            continue
+        for no, ln in enumerate(strip(f.read_text()).splitlines(), 1):
+            if FLOAT_RX.search(ln):
+                errors.append(f"{f.relative_to(FW)}:{no}: float outside the 303 engine (eng_303.c, x0x/)")
+    return errors
+
+
 def main():
     global PRODUCT, VERSION
     ap = argparse.ArgumentParser()
@@ -403,6 +450,10 @@ def main():
     errors += hal_err
     if not hal_err:
         notes.append("register access: hal/ only (src/, engines/src/, loader/ clean)")
+    fp_err = float_check()
+    errors += fp_err
+    if not fp_err:
+        notes.append("float: the 303 engine only")
     for n in notes:
         print("  ok   ", n)
     for e in errors:

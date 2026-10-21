@@ -39,25 +39,32 @@ static uint8_t eng_mem_owner[NPART];       /* engine index + 1 whose state is in
 #endif
 #if FELUCCA_SLICE
 #include "eng_slice.c"
-#else
-/* engine 13 without SLICE (FELUCCA_SLICE=0): never selectable, never stored (eng_stored_ok), silent */
-static void slice_gone_note_on(struct track *t, voice_t *v) { (void)t; (void)v; }
-static void slice_gone_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+#endif
+#if !FELUCCA_SLICE || !T303_ON
+/* an engine number this build reserves (13 without SLICE, FELUCCA_SLICE=0; 15 without the 303): never selectable,
+ * never stored (eng_stored_ok), silent */
+static void gone_note_on(struct track *t, voice_t *v) { (void)t; (void)v; }
+static void gone_render(struct track *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
 {
     (void)t; (void)v; (void)out; (void)n; (void)m;
 }
-#define SLICE_GONE_P {"-", F_INT, 0, 0, 0, 0, 0}
-static const engine_t ENG_SLICE_GONE = {
+#define GONE_P {"-", F_INT, 0, 0, 0, 0, 0}
+static const engine_t ENG_GONE = {
     .name = "-",
     .page_title = {"-", "-"},
-    .edit = {SLICE_GONE_P, SLICE_GONE_P, SLICE_GONE_P, SLICE_GONE_P, SLICE_GONE_P, SLICE_GONE_P, SLICE_GONE_P,
-             SLICE_GONE_P},
-    .note_on = slice_gone_note_on,
-    .render = slice_gone_render,
+    .edit = {GONE_P, GONE_P, GONE_P, GONE_P, GONE_P, GONE_P, GONE_P, GONE_P},
+    .note_on = gone_note_on,
+    .render = gone_render,
     .knob = {P_E0, P_E1, P_E2, P_REL},
 };
 #endif
 #include "eng_dco.c"            /* DCO: a Juno-106 voice, after fm-106 / KR-106 (dco_dsp.c) */
+#if T303_ON
+#include "eng_303.c"            /* 303: X0X's Open303 (x0x/bass303.c), the only float code */
+#else
+static int t303_shed(void) { return 0; }   /* (audio.c's overload guard) */
+static void t303_calm(void) {}
+#endif
 
 /* the editor protocol, user presets and projects store these indices: append, never reorder */
 static const engine_t *const ENGINES[NENGINES] = {
@@ -81,9 +88,14 @@ static const engine_t *const ENGINES[NENGINES] = {
 #if FELUCCA_SLICE
     &ENG_SLICE,                  /* 13 (ENGI_SLICE) */
 #else
-    &ENG_SLICE_GONE,             /* 13: reserved (FELUCCA_SLICE=0 builds without SLICE) */
+    &ENG_GONE,                   /* 13: reserved (FELUCCA_SLICE=0 builds without SLICE) */
 #endif
     &ENG_DCO,                    /* 14 (ENGI_DCO) */
+#if T303_ON
+    &ENG_303,                    /* 15 (ENGI_303) */
+#else
+    &ENG_GONE,                   /* 15: reserved (FELUCCA_303=0, FELUCCA_FM4) */
+#endif
 };
 _Static_assert(NELEM(ENGINES) == NENGINES, "ENGINES[]: one per engine number");
 
@@ -146,18 +158,21 @@ static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
 #endif
     10,                          /* DRUM */
 #if !FELUCCA_FM4
-    ENGI_DCO,                    /* DCO: last, so every other engine keeps its key on the EDIT layer */
+    ENGI_DCO,                    /* DCO, then 303: last, so every other engine keeps its key on the EDIT layer */
+#endif
+#if T303_ON
+    ENGI_303,
 #endif
 };
 _Static_assert(NELEM(ENGINE_ORDER) == NENG_SHOWN, "ENGINE_ORDER: every engine one can pick");
 
-/* the engines one can pick (engine 1 only with FELUCCA_FM4, 13 only with FELUCCA_SLICE, 14 not with FELUCCA_FM4), in
- * ENGINE_ORDER: eng_ok(e), the n-th of them eng_vis(n), e's place among them eng_rank(e), the next / previous one
- * eng_step(e, dir) (wraps) */
+/* the engines one can pick (engine 1 only with FELUCCA_FM4, 13 only with FELUCCA_SLICE, 14 not with FELUCCA_FM4, 15
+ * with T303_ON), in ENGINE_ORDER: eng_ok(e), the n-th of them eng_vis(n), e's place among them eng_rank(e), the next /
+ * previous one eng_step(e, dir) (wraps) */
 static int eng_ok(uint32_t e)
 {
     return e < NENGINES && (FELUCCA_FM4 || e != ENGI_DIGITAL) && (FELUCCA_SLICE || e != ENGI_SLICE) &&
-           (!FELUCCA_FM4 || e != ENGI_DCO);
+           (!FELUCCA_FM4 || e != ENGI_DCO) && (T303_ON || e != ENGI_303);
 }
 /* an engine number a project may hold: one this build plays, or DIGITAL (its sounds load as FM6, fm4_track) */
 static int eng_stored_ok(uint32_t e) { return eng_ok(e) || e == ENGI_DIGITAL; }

@@ -16,6 +16,10 @@ thanks the work below; each keeps its own licence (see [LICENSE](LICENSE), [LICE
 - FM6 engine: msfa from [Dexed](https://github.com/asb2m10/dexed) by Google Inc. and Pascal Gauthier ([Apache-2.0](LICENSES/Apache-2.0-msfa.txt))
 - DCO engine and the BBD chorus (CHORUS TYPE I, II, I+II): the Juno-106 models of [Ultramaster KR-106](https://github.com/kayrockscreenprinting/ultramaster_kr106) by Kayrock Screenprinting,
   through [fm-106](https://github.com/PatttF/fm-106) by [PatttF](https://github.com/PatttF), their fixed-point port to the FM-1 (both GPL-3.0); its presets are Juno-106 factory patches as they carry them
+- 303 engine and TB-3PO: [Open303](https://github.com/RobinSchmidt/Open303) by Robin Schmidt ([MIT](LICENSES/MIT-Open303.txt)), with the
+  Devilfish ranges and the SOFT / RAT drive of [schwung-303](https://github.com/charlesvestal/schwung-303), as [X0X](https://github.com/charlesvestal/fm1-x0x)
+  by [charlesvestal](https://github.com/charlesvestal) ported it to the FM-1; its TB-3PO line generator, from [schwung-tb3po](https://github.com/charlesvestal/schwung-tb3po),
+  after the [Phazerville](https://github.com/djphazer/O_C-Phazerville) Hemisphere Suite's TB_3PO applet (djphazer and contributors) (GPL-3.0)
 - Second core: its start, mailbox and guards from [X0X](https://github.com/charlesvestal/fm1-x0x) by [charlesvestal](https://github.com/charlesvestal)
   with the dual-core findings of [Melodee](https://github.com/keremimo/melodee) by [keremimo](https://github.com/keremimo); its audio split,
   measurements and hardening after [Jangada](https://github.com/zednaked/jangada) by [zednaked](https://github.com/zednaked) (all GPL-3.0)

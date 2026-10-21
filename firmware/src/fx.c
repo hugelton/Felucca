@@ -940,7 +940,8 @@ static __attribute__((noinline)) void mix_spread(track_t *t, int32_t *b, uint32_
 #if FELUCCA_CPU2
 static uint16_t part_cost[NTRK];                        /* the last block's, per part */
 static const uint16_t ENG_VCOST[NENGINES] = {163, FELUCCA_FM4 ? 181 : 0, 162, 67, 70, 174, 144, 143, 189, 309, 113, 134,
-                                             181, FELUCCA_SLICE ? 129 : 0, 290};   /* (.., SLICE, DCO) */
+                                             181, FELUCCA_SLICE ? 129 : 0, 290, T303_ON ? 240 : 0};   /* (.., SLICE, DCO,
+                                                                                                  * 303) */
 #endif
 
 /* one synth part into the dry mix and the sends of sm (mx[0]; mx[1] on the second core); a part with no voice sounding costs

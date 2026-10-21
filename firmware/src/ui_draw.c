@@ -846,6 +846,8 @@ static void draw_foot(void)
     }
     if (grid_on())
         sig += 0x51EDu + (uint32_t)black_held(GK_ACC) * 977u;
+    if (tb3_on())                                      /* TB-3PO's hint: NEW LINE's star, refused in a song */
+        sig += 0x7B3Fu + tb3_rt[song.sel % NTRK].stale * 977u + (uint32_t)chain_busy() * 31u;
     help = ui.help_t && !ui.ml.on ? help_page() : 0;   /* 1.5, HELP ON: the page's hint for ~2 s after it was entered
                                                        * (not while MIDI LEARN shows its line) */
     if (help)
@@ -860,6 +862,11 @@ static void draw_foot(void)
     cv_begin(240, H_FOOT, T_BG);
     if (help) {                                       /* row 1: the hint in place of the steps or the OCT+ / OCT- hint */
         help_row(help, 2);
+    } else if (tb3_on()) {                            /* row 1: TB-3PO's OCT+ / OCT- (ui_tb3po.c); the star: the knobs */
+        khint_t kh[2];                                /* no longer match the line */
+        kh[0] = (khint_t){KC_OCTUP, tb3_rt[song.sel % NTRK].stale ? "NEW LINE *" : "NEW LINE"};
+        kh[1] = (khint_t){KC_OCTDN, "MUTATE"};
+        cv_key_row(8, 232, 2, kh, 2, chain_busy() ? 0u : 3u, T_BG);
     } else if (act_cols()) {                          /* row 1: the OCT+ / OCT- hint in place of the steps */
         char ha[16], hb[16];
         khint_t kh[3];
@@ -1464,6 +1471,7 @@ static void confirm_text(char *a, char *b)
         break;
     case CF_INIT_SOUND:
         str_cpy(a, "INITIALIZE SOUND?", 24);
+        str_cpy(b, "KNOB 1: CLEAN INIT", 24);         /* (ui_input.c: KNOB 1 turns it into CLEAN INIT) */
         break;
     case CF_CLEAN_SOUND:                             /* 1.5.5 (#190): the basic sound, nothing added */
         str_cpy(a, "CLEAN INIT SOUND?", 24);
@@ -1613,8 +1621,10 @@ static void ui_draw_page(uint32_t counting)
         return;
     }
     if (!ui.home && !page_visible(ui.page)) {          /* an OP page of a track that is not DIGITAL (without
-                                                         * FELUCCA_FM4: any track): EDIT 1 */
-        ui.page = (uint8_t)page_first(FAM_EDIT);
+                                                         * FELUCCA_FM4: any track): EDIT 1; ARP's of a 303 track (or
+                                                         * TB-3PO's of another): the family's first shown */
+        uint32_t f = PAGES[ui.page].fam == FAM_ARP ? page_first(FAM_ARP) : NPAGES;
+        ui.page = (uint8_t)(f < NPAGES && page_visible(f) ? f : page_first(FAM_EDIT));
         page_entered();
     }
     cursor_fix();

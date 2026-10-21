@@ -77,10 +77,17 @@ Build options (environment, `0` or `1`; defaults in `firmware/src/felucca.c`, `c
 | `FELUCCA_UART` | 1 | TRS MIDI IN |
 | `FELUCCA_SLICE` | 1 | the SLICE engine (`0`: engine 13 reserved, so DCO stays 14) |
 | `FELUCCA_ICONS` | 1 | parameter icons on the knob cards |
-| `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion (a test build: the DCO engine is left out, the EDIT layer has room for 14) |
+| `FELUCCA_303` | 1 | the 303 engine (X0X's Open303, `firmware/src/eng_303.c`, `x0x/`) and TB-3PO, its ARP (`0`: engine 15 reserved, no float code) |
+| `FELUCCA_FM4` | 0 | the retired DIGITAL engine (4-operator FM) instead of its FM6 conversion (a test build: the DCO and 303 engines are left out, the EDIT layer has room for 15) |
 
 `FELUCCA_USB_LAYOUT` (`0` to `3`, default `0`) picks other USB descriptor layouts for testing; see
 `firmware/src/usb.c`.
+
+The app is compiled for the single-precision FPU (`-mcpu=r3 -mfprev1 -ffp-contract=off`, `tools/build.py` `FPU`): the 303
+engine is float (X0X's port of Open303). The flags change no instruction of the integer code. Only the 303 may use float:
+the build fails on `float` or `double` in any other source (`float_check`) and on an FPU instruction outside the 303's
+functions in the image. The host tests build it with `-ffp-contract=off` too (and `eng_303.c` sets the pragma), so a host
+render is the device's, sample for sample.
 
 ## Samples
 
@@ -115,8 +122,8 @@ Runs the host tests and, with Node.js, the web page tests (and, with Emscripten 
 user presets, projects of every format, backup, the keys and knobs, MIDI (USB, TRS, clock,
 control), USB audio, the update entry and loader, the command-line installer, the UI (the real
 drawing code against stubs: every screen in every palette is rendered and checked for clipped or
-overlapping text; PNGs land in `build/ui_new/`), every engine (DRUM, NOISE, PHYS, FM6, SLICE, DCO, the
-DIGITAL conversion), the chord keys, the modulation matrix, the FX layer, the reverbs and the BBD chorus, the SLICER
+overlapping text; PNGs land in `build/ui_new/`), every engine (DRUM, NOISE, PHYS, FM6, SLICE, DCO, 303 against X0X's own code, the
+DIGITAL conversion), TB-3PO against X0X's float generator (`tests/ref/`), the chord keys, the modulation matrix, the FX layer, the reverbs and the BBD chorus, the SLICER
 and swing. With `DAISYSP` pointing at a DaisySP checkout, the PHYS models are also compared with
 their floating-point originals; without it that test is skipped. Felucca-Engines' own test
 (`firmware/engines/tests/run.sh`) runs too, and its standalone host is built once more with Felucca's tables

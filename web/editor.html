@@ -1687,7 +1687,7 @@ function makeMockDevice(opt = {}) {
     E("MIDI", ["USB", "TRS"], 0), E("SYNC", NDASH, 0), E("ROUT", ["CH1-4", "SEL", "CH5-8", "CH9-12", "CH13-16", "TRACK"], 0), D("CPU", F.INT, 0, 0, 0),
     D("SLOT", F.INT, 1, 4, 1), E("NAME", NDASH, 0), E("LOAD", NGO, 0), E("SAVE", NGO, 0),
     E("ENG", ["ANALOG", "-", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL",
-      "GRAIN", "PHYS", "DRUM", "NOISE", "FM6", "SLICE", "DCO"], 0), E("SET", NGO, 0),
+      "GRAIN", "PHYS", "DRUM", "NOISE", "FM6", "SLICE", "DCO", "303"], 0), E("SET", NGO, 0),
     E("CLRSQ", NGO, 0), E("INIT", NGO, 0),
     E("TYPE", ["ROOM", "SPRING", "HALL"], 2),       /* G_RTYPE (id 24, was G_DRCH): the reverb's model (HALL: 1.2) */
     E("TYPE", ["STD", "I", "II", "I+II"], 0),        /* G_CTYPE (id 25, was G_DRLVL): CHORUS TYPE, STD or the BBD */
@@ -1787,6 +1787,12 @@ function makeMockDevice(opt = {}) {
         P("DARK SYNTH", [3, 0, 127, 0, 56, 86, 71, 0], [0, 109, 0, 110], 0, 4), P("HARPSI", [1, 27, 35, 0, 127, 127, 86, 3], [0, 115, 0, 89], 0, 3),
         P("ORCHESTRA", [3, 53, 127, 0, 33, 0, 36, 0], [76, 124, 50, 111], 0, 5), P("DARK ENS", [3, 57, 75, 0, 55, 0, 107, 0], [72, 27, 127, 93], 0, 5),
         P("CHORUS BEL", [1, 53, 101, 0, 59, 127, 127, 0], [0, 116, 0, 113], 0, 7), P("ETHEREAL", [3, 53, 59, 0, 47, 120, 127, 0], [98, 110, 127, 112], 0, 5)] },   /* (firmware/src/eng_dco.c, dco_presets.h: tools/fm106_presets.py) */
+    { name: "303", titles: ["303", "DRIVE"], edit: [D("CUT", F.PCT, 0, 127, 48), D("RES", F.PCT, 0, 127, 100), D("ENV", F.PCT, 0, 127, 85), D("DCY", F.PCT, 0, 127, 64),
+        D("ACC", F.PCT, 0, 127, 100), E("WAVE", ["SAW", "SQR"], 0), D("DRV", F.PCT, 0, 127, 45), E("DTYP", ["SOFT", "RAT"], 1)],
+      presets: [P("ACID", [48, 100, 85, 64, 100, 0, 45, 1], [0, 64, 127, 10], 1, 1), P("CLASSIC", [64, 64, 64, 64, 64, 0, 0, 0], [0, 64, 127, 10], 1, 1),
+        P("SQUELCH", [30, 118, 110, 40, 110, 0, 20, 0], [0, 64, 127, 10], 1, 1), P("SQR BASS", [40, 70, 50, 50, 80, 1, 0, 0], [0, 64, 127, 10], 1, 2),
+        P("RUBBER", [20, 90, 100, 90, 90, 1, 30, 0], [0, 64, 127, 10], 1, 1), P("DIST ACID", [56, 110, 95, 70, 120, 0, 90, 1], [0, 64, 127, 10], 1, 1),
+        P("DEEP", [16, 40, 30, 100, 60, 0, 0, 0], [0, 64, 127, 10], 1, 8), P("SCREAM", [70, 124, 127, 30, 127, 0, 70, 1], [0, 64, 127, 10], 1, 1)] },   /* (firmware/src/eng_303.c, t303_presets.h) */
   ];
   const FM6_E = ENG.findIndex((e) => e.name === "FM6"), FM6_OWN = FM6.FACTORY_PK.length, DRUM_E = ENG.findIndex((e) => e.name === "DRUM");
   /* factory PATTERNS[] (engines.c; the device loads them from SAVE > PHRASES, presets only suggest one): absolute
@@ -2439,7 +2445,7 @@ function enumShown(d) {
    the engine numbers. engineOrder(names): the indices of names in that order, "-" (a reserved number) left out; a name
    the list does not know (another firmware) follows in index order */
 const ENGINE_ORDER = ["ANALOG", "FM6", "DIGITAL", "PHASE", "LOFI", "SAMPLE", "VOICE", "TRIO", "WHEEL", "GRAIN", "PHYS", "NOISE",
-  "SLICE", "DRUM", "DCO"];
+  "SLICE", "DRUM", "DCO", "303"];
 function engineOrder(names) {
   const rank = (n) => { const k = ENGINE_ORDER.indexOf(n); return k < 0 ? ENGINE_ORDER.length : k; };
   return (names || []).map((n, i) => i).filter((i) => names[i] !== "-")

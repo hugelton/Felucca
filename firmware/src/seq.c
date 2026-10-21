@@ -171,6 +171,10 @@ static uint32_t kb_map(const track_t *t, uint32_t k)
 #include "chord.c"
 
 /* ------------------------------------------------------------- arp --- */
+/* the track's ARP mode (P_AMODE): none on a 303 track, whose ARP is TB-3PO (eng_303.c, tb3po.c; the stored mode stays,
+ * a switch to another engine plays it again) */
+static int32_t arp_mode(const track_t *t) { return t->eng_req % NENGINES == ENGI_303 ? 0 : t->p[P_AMODE]; }
+
 static void arp_add(track_t *t, uint32_t note)
 {
     uint32_t i, k = in_key - 1u;
@@ -220,6 +224,7 @@ static void rec_release(track_t *t, uint32_t note);
 static int rec_on(const track_t *t) { return ((song.rec >> trk_index(t)) & 1u) && song.playing && !chain.running; }
 
 #include "motion.c"
+#include "tb3po.c"               /* TB-3PO: the 303 engine's line generator (its ARP), auto MUTATE in seq_enter */
 
 /* the ARP's modes (P_AMODE). Append-only: a stored value keeps its meaning. ORD (1.2, it played as UP before) plays
  * the held notes in the order they were pressed, whatever ARP 2's ORD switch says (that switch orders the list of the
@@ -434,7 +439,7 @@ static void arp_step(track_t *t, uint32_t n, uint32_t gate_n)
         else
             t->arp_off -= gate_n;
     }
-    if (!t->p[P_AMODE] || !t->nheld) {
+    if (!arp_mode(t) || !t->nheld) {
         if (!t->nheld && t->arp_note)
             arp_off(t);
         return;
@@ -605,7 +610,7 @@ static void rec_release(track_t *t, uint32_t note)
 static __attribute__((noinline)) void cin_keep(track_t *t, uint32_t note, uint32_t vel)
 {
     uint32_t i = trk_index(t), k;
-    if (cin_left != 1u || cin_pos < click_beat_len() / 2u || !((song.rec >> i) & 1u) || t->p[P_AMODE])
+    if (cin_left != 1u || cin_pos < click_beat_len() / 2u || !((song.rec >> i) & 1u) || arp_mode(t))
         return;
     for (k = 0; k < cin_n[i] && cin_note[i][k] != note; k++)
         ;
@@ -624,9 +629,9 @@ static void input_on(track_t *t, uint32_t note, uint32_t vel)
     last_note = (uint8_t)note;
     if (cin_left)
         cin_keep(t, note, vel);
-    if (rec_on(t) && !t->p[P_AMODE])               /* (ARP on: arp_tick records its notes) */
+    if (rec_on(t) && !arp_mode(t))                 /* (ARP on: arp_tick records its notes) */
         rec_note(t, note, vel);
-    if (t->p[P_AMODE])
+    if (arp_mode(t))
         arp_add(t, note);
     else
         trk_note_on(t, note, vel);
@@ -1149,8 +1154,11 @@ static __attribute__((noinline)) void seq_nd_start(track_t *t, uint32_t period, 
  * recorded note held ties into it (not inlined: once a step, off the audio ISR's loop) */
 static __attribute__((noinline)) void seq_enter(track_t *t, uint32_t top, uint32_t len)
 {
-    if (!t->seq_idx)
+    if (!t->seq_idx) {
         t->cond_loop = (uint8_t)(top || t->cond_loop + 1u >= COND_LOOPS ? 0u : t->cond_loop + 1u);
+        if (t->eng_req % NENGINES == ENGI_303)
+            tb3_pass(t, top);                       /* TB-3PO's auto MUTATE, before step 1 plays (tb3po.c) */
+    }
     rec_hold(t, t->seq_idx, len);
 }
 
@@ -1358,14 +1366,14 @@ static void events_block(uint32_t n)
         }
         engine_block(t);                              /* engine switch: fade, then switch (voice.c) */
         /* ARP turned off, or HOLD released with no key down: drop the latched chord */
-        if ((t->armp && !t->p[P_AMODE]) || (t->aholdp && !t->p[P_AHOLD] && !t->arp_phys)) {
+        if ((t->armp && !arp_mode(t)) || (t->aholdp && !t->p[P_AHOLD] && !t->arp_phys)) {   /* (a switch to the 303 too) */
             t->nheld = 0;
-            if (!t->p[P_AMODE])
+            if (!arp_mode(t))
                 t->arp_phys = 0;
             if (t->arp_note)
                 arp_silence(t);
         }
-        t->armp = t->p[P_AMODE];
+        t->armp = (int16_t)arp_mode(t);
         t->aholdp = t->p[P_AHOLD];
     }
     keyboard_block();
