@@ -67,6 +67,13 @@ insert effect with a dry / wet mix, Discussions #78 #177), then `TYPE` (101, ANA
 P_COUNT and P_E0 from `INFO` keeps working. Projects stay FUN10 (3840 bytes, 111 at byte 66; 16 bytes to spare). See
 "1.5: the INSERT" and "1.5: filter TYPE, ENV SYNC" below.
 
+**1.8 (114 parameters, FUN10 as it was):** three track parameters went in before the engine parameters, which moved
+from 103..110 to 106..113: P_COUNT 114, P_E0 106. AFTERTOUCH, on EDIT > VOICE 3: `AT` (103, the keys' pressure: OFF,
+1 .. 10; only F3 .. C5 sense it), `ATDST` (104, a destination as the matrix's `DST`) and `ATAMT` (105, -64..63): the
+track's aftertouch, the keys' or MIDI's, routed as a modulation slot of its own. All three 0 = as before. No command
+changed; an editor that takes P_COUNT and P_E0 from `INFO` keeps working. Projects stay FUN10 (114 at byte 66; 4 bytes
+to spare before MIDI IN TRACK's three).
+
 ## Framing
 
 A request is `F0 7D 46 4C <cmd> <args...> F7`:
@@ -92,7 +99,7 @@ watches (v2, `WATCH`), the device also sends push frames (cmds 23, 24, 26) at an
 | track | 0..3: tracks 1..4 (synth parts) |
 | engine byte | 0..NENGINES−1 (firmware before 1.0: NENGINES = its drum track, no engine). The numbers are fixed, new engines are appended: 0 ANALOG, 1 reserved (DIGITAL before 1.0: see below), 2 PHASE, 3 LOFI, 4 SAMPLE, 5 VOICE, 6 TRIO, 7 WHEEL, 8 GRAIN, 9 PHYS, 10 DRUM, 11 NOISE, 12 FM6, 13 SLICE (NENGINES 14; a build with `FELUCCA_SLICE=0` has 13). The device and the editor list them in another order (ANALOG FM6 PHASE LOFI SAMPLE VOICE TRIO WHEEL GRAIN PHYS NOISE SLICE DRUM: `ENGINE_ORDER`); the numbers stay |
 
-The engine parameters are `P_E0..P_E7`: P_COUNT−8 .. P_COUNT−1 (103..110 since 1.5; 96..103 in 1.2 .. 1.4; 91..98 in
+The engine parameters are `P_E0..P_E7`: P_COUNT−8 .. P_COUNT−1 (106..113 since 1.8; 103..110 in 1.5 .. 1.7; 96..103 in 1.2 .. 1.4; 91..98 in
 1.1), and `INFO` gives `P_E0`.
 Their meaning, range and names depend on the current engine, so re-read `DESC` for them
 after an engine change.

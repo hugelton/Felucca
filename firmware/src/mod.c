@@ -56,9 +56,17 @@ enum { MD_OFF, MD_PITCH, MD_CUT, MD_SHP, MD_AMP, MD_PAN, MD_DIST, MD_CHO, MD_DLY
 _Static_assert(NELEM(N_MSRC) == MS_N && NELEM(N_MDST) == MD_N, "N_MSRC / N_MDST == MS_* / MD_*");
 _Static_assert(P_M2SRC == P_M1SRC + 3 && P_M4AMT == P_M1SRC + 11 && P_M4AMT + 1 == P_FM1_ATK, "matrix slots: 3 ids each");
 #define NMSLOT 4u
+#define NMSLOT_ALL (NMSLOT + 1u)  /* + 1.8's AFTERTOUCH (VOICE 3): a slot of its own, its source AT (P_ATDST, P_ATAMT) */
 #define MS_VOICE(s) ((s) >= MS_ENV && (s) <= MS_RAND)             /* a value per voice */
 #define MS_BIPOLAR(s) ((s) == MS_LFO || (s) == MS_KEY || (s) == MS_RAND || (s) >= MS_SH)
 #define MD_ENGINE(d) ((d) >= MD_E1 && (d) < MD_E1 + 8)           /* E1..E8: P_E0..P_E7 */
+
+/* slot k's source, destination, amount (k == NMSLOT: AFTERTOUCH's) */
+static inline uint32_t ms_src(const int16_t *p, uint32_t k) { return k < NMSLOT ? (uint32_t)p[P_M1SRC + 3u * k] : MS_AT; }
+static inline int32_t ms_dst(const int16_t *p, uint32_t k) { return k < NMSLOT ? p[P_M1DST + 3u * k] : p[P_ATDST]; }
+static inline int32_t ms_amt(const int16_t *p, uint32_t k) { return k < NMSLOT ? p[P_M1AMT + 3u * k] : p[P_ATAMT]; }
+/* the slots to look at: AFTERTOUCH's only while it routes (the matrix's own loops as before otherwise) */
+static inline uint32_t ms_n(const int16_t *p) { return NMSLOT + (p[P_ATDST] && p[P_ATAMT]); }
 
 /* the track parameter of a per-block destination */
 static uint32_t mod_param(uint32_t d)
@@ -74,10 +82,10 @@ typedef struct {                 /* a part's, while mix_part renders it (one per
     uint8_t nv, nk;              /* voice terms, per-block parameters held */
     int32_t pit, cut, shp, gain; /* per voice, from the per-track sources (gain Q15) */
     int32_t ldep;                /* DEPTH: the track LFO's gain (Q15; 32767 = none, track_render leaves it alone) */
-    uint8_t vsrc[NMSLOT], vdst[NMSLOT];
-    int8_t vamt[NMSLOT];
-    uint8_t kid[NMSLOT];         /* per-block: the parameter, its stored value */
-    int16_t keep[NMSLOT];
+    uint8_t vsrc[NMSLOT_ALL], vdst[NMSLOT_ALL];
+    int8_t vamt[NMSLOT_ALL];
+    uint8_t kid[NMSLOT_ALL];     /* per-block: the parameter, its stored value */
+    int16_t keep[NMSLOT_ALL];
 } modw_t;
 #if FELUCCA_CPU2
 static modw_t mod_w[NTRK];
@@ -163,7 +171,46 @@ static __attribute__((noinline)) int32_t mod_depth(const track_t *t, int32_t lfo
         if (p[P_M1DST + 3u * k] == MD_DEPTH && p[P_M1AMT + 3u * k] && s && s < MS_N)
             g = mulq15(g, mod_gain(s == MS_LFO && p[P_LPOL] ? MS_ENV : s, mod_tsrc(t, s, lfo), p[P_M1AMT + 3u * k]));
     }
+    if (p[P_ATDST] == MD_DEPTH && p[P_ATAMT])           /* 1.8: AFTERTOUCH's */
+        g = mulq15(g, mod_gain(MS_AT, mod_tsrc(t, MS_AT, lfo), p[P_ATAMT]));
     return g;
+}
+
+/* mod_begin's slot (s, d, a): a per-voice term into mw, or a per-block offset into off (inlined: the matrix's loop
+ * as it was, AFTERTOUCH's slot after it) */
+static inline __attribute__((always_inline)) void mod_slot(track_t *t, modw_t *mw, int32_t *off, int32_t lfo,
+                                                           uint32_t s, uint32_t d, int32_t a)
+{
+    const int16_t *p = t->p;
+    uint32_t j;
+    if (!s || !d || !a || s >= MS_N || d >= MD_DEPTH)
+        return;
+    if (d <= MD_AMP) {                                  /* per voice */
+        mw->amp |= d == MD_AMP;
+        if (MS_VOICE(s)) {
+            mw->vsrc[mw->nv] = (uint8_t)s;
+            mw->vdst[mw->nv] = (uint8_t)d;
+            mw->vamt[mw->nv++] = (int8_t)a;
+        } else {                                        /* (a UNI LFO, 0..1, takes AMP as ENV does) */
+            mod_voice_add(s == MS_LFO && p[P_LPOL] ? MS_ENV : s, d, mod_tsrc(t, s, lfo), a, &mw->pit, &mw->cut,
+                          &mw->shp, &mw->gain);
+        }
+        return;
+    }
+    {                                                   /* per block: AMT 64 = the whole range */
+        uint32_t id = mod_param(d);
+        const param_desc_t *pd = id >= P_E0 ? &ENGINES[t->engine]->edit[id - P_E0] : &TP[id];
+        int32_t x = mod_tsrc(t, s, lfo);
+        for (j = 0; j < mw->nk && mw->kid[j] != id; j++)
+            ;
+        if (j == mw->nk) {
+            mw->kid[j] = (uint8_t)id;
+            mw->keep[j] = p[id];
+            off[j] = 0;
+            mw->nk++;
+        }
+        off[j] += (((x * a) >> 6) * (pd->max - pd->min)) >> 15;
+    }
 }
 
 /* before a part's block (fx.c mix_part): the per-track offsets, the per-block destinations into t->p.
@@ -171,14 +218,14 @@ static __attribute__((noinline)) int32_t mod_depth(const track_t *t, int32_t lfo
 static __attribute__((noinline)) int mod_begin(track_t *t)
 {
     const int16_t *p = t->p;
-    int32_t lfo, off[NMSLOT];
-    uint32_t k, j;
+    int32_t lfo, off[NMSLOT_ALL];
+    uint32_t k, j, at = p[P_ATDST] && p[P_ATAMT] && p[P_ATDST] < MD_VEL;
     modw_t *mw = &MOD(t);
     mw->on = 0;
     for (k = 0; k < NMSLOT; k++)                        /* (VEL and TIME: at the notes, not here) */
         if (p[P_M1SRC + 3u * k] && p[P_M1DST + 3u * k] && p[P_M1AMT + 3u * k] && p[P_M1DST + 3u * k] < MD_VEL)
             break;
-    if (k == NMSLOT)
+    if (k == NMSLOT && !at)
         return 0;
     lfo = mulq15(t->lfo_val, t->lfo_fade);              /* (the LFO of the block before: track_render ticks it) */
     mw->on = 1;
@@ -189,38 +236,10 @@ static __attribute__((noinline)) int mod_begin(track_t *t)
     mw->ldep = mod_depth(t, lfo);                       /* DEPTH first: the other slots see the LFO it leaves */
     if (mw->ldep < 32767)
         lfo = mulq15(lfo, mw->ldep);
-    for (; k < NMSLOT; k++) {
-        uint32_t s = (uint32_t)p[P_M1SRC + 3u * k], d = (uint32_t)p[P_M1DST + 3u * k];
-        int32_t a = p[P_M1AMT + 3u * k], x;
-        if (!s || !d || !a || s >= MS_N || d >= MD_DEPTH)
-            continue;
-        if (d <= MD_AMP) {                              /* per voice */
-            mw->amp |= d == MD_AMP;
-            if (MS_VOICE(s)) {
-                mw->vsrc[mw->nv] = (uint8_t)s;
-                mw->vdst[mw->nv] = (uint8_t)d;
-                mw->vamt[mw->nv++] = (int8_t)a;
-            } else {                                    /* (a UNI LFO, 0..1, takes AMP as ENV does) */
-                mod_voice_add(s == MS_LFO && p[P_LPOL] ? MS_ENV : s, d, mod_tsrc(t, s, lfo), a, &mw->pit, &mw->cut,
-                              &mw->shp, &mw->gain);
-            }
-            continue;
-        }
-        {                                               /* per block: AMT 64 = the whole range */
-            uint32_t id = mod_param(d);
-            const param_desc_t *pd = id >= P_E0 ? &ENGINES[t->engine]->edit[id - P_E0] : &TP[id];
-            x = mod_tsrc(t, s, lfo);
-            for (j = 0; j < mw->nk && mw->kid[j] != id; j++)
-                ;
-            if (j == mw->nk) {
-                mw->kid[j] = (uint8_t)id;
-                mw->keep[j] = p[id];
-                off[j] = 0;
-                mw->nk++;
-            }
-            off[j] += (((x * a) >> 6) * (pd->max - pd->min)) >> 15;
-        }
-    }
+    for (; k < NMSLOT; k++)
+        mod_slot(t, mw, off, lfo, (uint32_t)p[P_M1SRC + 3u * k], (uint32_t)p[P_M1DST + 3u * k], p[P_M1AMT + 3u * k]);
+    if (at)                                             /* 1.8: AFTERTOUCH's */
+        mod_slot(t, mw, off, lfo, MS_AT, (uint32_t)p[P_ATDST], p[P_ATAMT]);
     for (j = 0; j < mw->nk; j++) {
         uint32_t id = mw->kid[j];
         const param_desc_t *pd = id >= P_E0 ? &ENGINES[t->engine]->edit[id - P_E0] : &TP[id];
@@ -273,9 +292,8 @@ static __attribute__((noinline)) int mod_has(const track_t *t, uint32_t d)
 {
     const int16_t *p = t->p;
     uint32_t k;
-    for (k = 0; k < NMSLOT; k++)
-        if (p[P_M1DST + 3u * k] == (int16_t)d && p[P_M1AMT + 3u * k] && p[P_M1SRC + 3u * k] > 0 &&
-            p[P_M1SRC + 3u * k] < MS_N)
+    for (k = 0; k < ms_n(p); k++)
+        if (ms_dst(p, k) == (int32_t)d && ms_amt(p, k) && ms_src(p, k) > 0 && ms_src(p, k) < MS_N)
             return 1;
     return 0;
 }
@@ -292,10 +310,10 @@ static __attribute__((noinline)) int32_t mod_at_note(const track_t *t, uint32_t 
     uint32_t k;
     if (g < 32767)
         lfo = mulq15(lfo, g);
-    for (k = 0; k < NMSLOT; k++) {
-        uint32_t s = (uint32_t)p[P_M1SRC + 3u * k];
-        int32_t a = p[P_M1AMT + 3u * k], x;
-        if (p[P_M1DST + 3u * k] != (int16_t)d || !a || !s || s >= MS_N)
+    for (k = 0; k < ms_n(p); k++) {
+        uint32_t s = ms_src(p, k);
+        int32_t a = ms_amt(p, k), x;
+        if (ms_dst(p, k) != (int32_t)d || !a || !s || s >= MS_N)
             continue;
         x = s == MS_VEL ? (int32_t)vel * 258 : s == MS_KEY ? mod_key(note) : s == MS_RAND ? rnd : mod_tsrc(t, s, lfo);
         if (d == MD_VEL) {

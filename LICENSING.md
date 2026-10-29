@@ -40,8 +40,10 @@ entry and libc; and the FM-1's board code: keys, LEDs, audio, display, ADC) is f
 Public License 2.0 (`SPDX-License-Identifier: MPL-2.0`, `firmware/bsp/LICENSE`, also
 `LICENSES/MPL-2.0-felucca-bsp.txt`; its authors and origins in `firmware/bsp/NOTICE`). Felucca builds
 `firmware/bsp/chip/` and `firmware/bsp/boards/fm1/` with its own code; `firmware/hal/fm1_uart.h` (GPL-3.0-only) is
-Felucca's own and is used instead of the BSP's. The firmware built with them is GPL-3.0-only as a whole; the MPL
-files stay MPL-2.0, and their source is part of Felucca's complete source as the engines' is.
+Felucca's own and is used instead of the BSP's. AFTERTOUCH's key readings, `firmware/src/keytouch.{c,h}`, are
+MPL-2.0 too: a port of charlesvestal's fm1-base (<https://github.com/charlesvestal/fm1-base>, `lib/sense.c`,
+`lib/touch.c`, MPL-2.0). The firmware built with them is GPL-3.0-only as a whole; the MPL files stay MPL-2.0, and
+their source is part of Felucca's complete source as the engines' is.
 
 You may use, study, change and share Felucca under the GPL. If you distribute Felucca, or
 firmware derived from it, you must also give your recipients its complete corresponding

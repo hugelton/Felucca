@@ -1315,6 +1315,11 @@ static void draw_columns(void)
         param_format(d, *vp, val, &unit);
         card_mot_of(vp);                                /* (a global: never) */
         card_span_of(d);
+        if (vp == &TSEL->p[P_ATDST]) {                  /* AFTERTOUCH's DEST: as MOD's (the engine's names) */
+            card_span_by(span_mod_dst, TSEL, 0, MD_N - 1, 0);
+            draw_column(c, d->label, mod_dst_name(TSEL, *vp), "", *vp ? VAL(c) : T_DIM, -1, mod_dst_icon(TSEL, *vp));
+            continue;
+        }
         if (vp == &TSEL->p[P_LRATE] && TSEL->p[P_LSYNC]) {   /* LFO 2 SYNC on: RATE does nothing, DIM (1.2) */
             draw_column(c, d->label, val, unit, T_DIM, RATIO(d, *vp), param_icon(d, *vp));
             continue;

@@ -7,7 +7,11 @@
 static int32_t master_knob = 512 * 16;
 static void master_poll(void)
 {
-    int32_t a = fm1_adc_read(FM1_ADC_MASTER);
+#ifdef KT_ROWKEYS
+    int32_t a = kt_adc_master();                        /* (1.8: the scan's, while it reads the keys) */
+#else
+    int32_t a = fm1_adc_read(FM1_ADC_MASTER);           /* (the host tests: no keytouch.c) */
+#endif
     if (a >= 0) {
         master_knob += (a * 16 - master_knob) / 8;
         song.master_q12 = master_of_pot((uint32_t)(master_knob / 16));

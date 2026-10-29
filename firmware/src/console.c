@@ -349,10 +349,27 @@ static void con_params(void)
     }
 }
 
+/* 1.8 AFTERTOUCH: the readings (keytouch.h), per key of F3 .. C5: its last driven reading and its pressure */
+static void con_at(void)
+{
+    uint32_t k;
+    con_kv("at_on", kt_on);
+    con_kv("an_timeouts", fm1_an.timeouts);
+    con_kv("held", (int32_t)(fm1_in.notes & 0xFFFFFu));
+    for (k = 0; k < KT_ROWKEYS; k++) {
+        con_dec((int32_t)k);
+        con_putc('=');
+        con_dec(kt_d[k]);
+        con_putc('/');
+        con_dec(kt_p[k]);
+        con_puts(k % 5u == 4u ? "\r\n" : " ");
+    }
+}
+
 static void con_exec(const char *p)
 {
     if (con_word(&p, "help") || con_word(&p, "?"))
-        con_puts("status  dbg  inp  crash  params  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
+        con_puts("status  dbg  inp  at  crash  params  memr ADDR [LEN]  flr OFF [LEN]  uboot yes\r\n");
     else if (con_word(&p, "status"))
         con_status();
     else if (con_word(&p, "dbg"))
@@ -361,6 +378,8 @@ static void con_exec(const char *p)
         con_crash();
     else if (con_word(&p, "inp"))
         con_inp();
+    else if (con_word(&p, "at"))
+        con_at();
     else if (con_word(&p, "params"))
         con_params();
     else if (con_word(&p, "memr"))

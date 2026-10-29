@@ -865,6 +865,29 @@ static void keyboard_block(void)
     kb_prev = cur;
 }
 
+/* 1.8 AFTERTOUCH: each key's pressure (kt_p, 0..127 by its track's SENS; keytouch.c writes it from the main loop and
+ * bumps kt_seq; the host builds: always 0) to its track's AT, the most of the keys playing it, and to MIDI OUT as
+ * channel pressure, on a change. A track no key presses stays as MIDI IN left it. noinline: out of the audio ISR's
+ * loop, and nothing to do until kt_seq moves */
+#define KT_KEYS 20u              /* the keys on the analog rows, F3 .. C5 (the top seven: none) */
+static volatile uint8_t kt_p[KT_KEYS], kt_seq;
+static uint8_t kt_done, kt_at[NTRK];
+static __attribute__((noinline)) void kt_block(void)
+{
+    uint8_t m[NTRK] = {0};
+    uint32_t k, i;
+    kt_done = kt_seq;
+    for (k = 0; k < KT_KEYS; k++)
+        if (kb_chn[k] && kb_trk[k] < NTRK && kt_p[k] > m[kb_trk[k]])
+            m[kb_trk[k]] = kt_p[k];
+    for (i = 0; i < NTRK; i++)
+        if (m[i] != kt_at[i]) {
+            kt_at[i] = m[i];
+            trk[i].at = m[i];
+            midi_out_event(0x0Du | (0xD0u | trk_midi_ch(i)) << 8 | (uint32_t)m[i] << 16);
+        }
+}
+
 /* -------------------------------------------------------- sequencer --- */
 static void seq_start(void)
 {
@@ -1421,6 +1444,8 @@ static void events_block(uint32_t n)
         t->aholdp = t->p[P_AHOLD];
     }
     keyboard_block();
+    if (kt_seq != kt_done)
+        kt_block();
     while (mi_r != mi_w) {                            /* USB-MIDI (and TRS) in */
         uint32_t at = mi_r % MQ, pkt = midi_in_q[at], status = (pkt >> 8) & 0xFFu;
         uint32_t st = status & 0xF0u, ch = status & 0x0Fu;

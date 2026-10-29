@@ -167,6 +167,9 @@ static void fm1_main(void)
     for (;;) {
         uint32_t m = fm1_ms;
         fm1_wdt_feed();
+#ifdef KT_ROWKEYS
+        kt_poll(m);                                     /* 1.8 AFTERTOUCH (keytouch.c) */
+#endif
         usb_retry(fm1_ms);
         if (fm1_ms > 30000u && bootguard.pending) {     /* a crash or hang in the first 30 s counts */
             bootguard.pending = 0;
@@ -184,7 +187,11 @@ static void fm1_main(void)
         }
 #endif
         {
-            int32_t b = fm1_adc_read(FM1_ADC_BATT);     /* battery: slow IIR */
+#ifdef KT_ROWKEYS
+            int32_t b = kt_adc_batt(m);                 /* battery: slow IIR (1.8: once a second while the keys are read) */
+#else
+            int32_t b = fm1_adc_read(FM1_ADC_BATT);     /* battery: slow IIR (the web emulator: no keytouch.c) */
+#endif
             if (b > 0)
                 song.batt_raw = song.batt_raw ? song.batt_raw + (b - song.batt_raw) / 32 : b;
         }
