@@ -616,8 +616,37 @@ static void font_scene(const char *mode, const char *name)
     }
 }
 /* GREY: every pixel RGB565 gray (R = B, G = 2 R); MONO (black and white, its edges blended per channel): neutral
- * (R = B, G within 2 of 2 R, the 5-6-5 rounding). Other palettes: nothing */
+ * (R = B, G within 2 of 2 R, the 5-6-5 rounding). Other palettes: nothing (GREY: but its primary and secondary, grey_ok) */
 static uint32_t mono_bad;
+/* GREY has two colours, its primary and secondary. A pixel there is gray, or a blend of a gray with one of the two (an
+ * edge, a gray ink on a filled keycap): the blend of a gray g with a colour C by a is g (1 - a) + a C, whose chroma (its
+ * distance from the gray axis, per channel) points where C's does. So: gray, or its chroma points to primary's or secondary's */
+static int grey_ok(uint16_t c)
+{
+    static int32_t dir[2][3];
+    static int init;
+    int32_t v[3], m, k, n2 = 0, j;
+    if ((c >> 11) == (c & 31u) && ((c >> 5) & 63u) == (c >> 11) * 2u) return 1;
+    if (!init) {
+        for (j = 0; j < 2; j++) {
+            uint16_t q = j ? ux.accent : ux.rec;
+            int32_t w[3] = {(q >> 11) * 255 / 31, ((q >> 5) & 63) * 255 / 63, (q & 31) * 255 / 31};
+            m = (w[0] + w[1] + w[2]) / 3;
+            for (k = 0; k < 3; k++) dir[j][k] = w[k] - m;
+        }
+        init = 1;
+    }
+    v[0] = (c >> 11) * 255 / 31; v[1] = ((c >> 5) & 63) * 255 / 63; v[2] = (c & 31) * 255 / 31;
+    m = (v[0] + v[1] + v[2]) / 3;
+    for (k = 0; k < 3; k++) { v[k] -= m; n2 += v[k] * v[k]; }
+    if (n2 <= 3 * 4 * 4) return 1;                    /* (the 5-6-5 rounding of a near-gray) */
+    for (j = 0; j < 2; j++) {
+        int64_t dot = 0, nd = 0;
+        for (k = 0; k < 3; k++) { dot += (int64_t)v[k] * dir[j][k]; nd += (int64_t)dir[j][k] * dir[j][k]; }
+        if (dot > 0 && dot * dot * 100 >= (int64_t)n2 * nd * 97) return 1;   /* cos^2 >= 0.97 */
+    }
+    return 0;
+}
 static void mono_check(void)
 {
     uint32_t i, bw = settings.palette == UI_BW_INDEX;
@@ -625,7 +654,7 @@ static void mono_check(void)
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = swap16(host_screen[i]);
         int32_t d = (int32_t)((c >> 5) & 63u) - (int32_t)(c >> 11) * 2;
-        if ((c >> 11) != (c & 31u) || (bw ? d < -2 || d > 2 : d != 0)) {
+        if (bw ? ((c >> 11) != (c & 31u) || d < -2 || d > 2) : !grey_ok(c)) {
             if (!mono_bad) fprintf(rep, "%s %s: pixel %u,%u = %04x off %s\n", bw ? "MONO" : "GREY", cur_name, i % 240u, i / 240u, c,
                                    bw ? "neutral" : "gray");
             mono_bad++;
