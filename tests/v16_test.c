@@ -272,7 +272,7 @@ static int custom_palette_ui(void)
         persist_t p;
         palette_choose(NPALETTES);
         settings_export(&p);
-        ok = p.palette == palette_to_stored(0u) && p.favorites.factory[15][12] == 3u && palette_from_stored(p.palette) == 0u;
+        ok = p.palette == palette_to_stored(0u) && p.favorites.factory[15][12] == 7u && palette_from_stored(p.palette) == 0u;
         bad += check("  saved: persist_t.palette is the built-in palette (the base), the colours and flags in favorites", ok);
     }
     ok = screens_lit("dark");
@@ -299,7 +299,7 @@ static int custom_palette_ui(void)
         }
         ok = cpal_on() && menu_step(MI_COLOR, 1) == 0u;
         palette_choose(menu_step(MI_COLOR, 1));
-        ok &= !cpal_on() && T_BG == UI_PALETTES[0].bg;
+        ok &= !cpal_on() && T_BG == UI_PALETTES[0].c1;
         bad += check("  colours nobody can read (one grey, all white): drawn without a fault, COLOR steps back to a built-in palette", ok);
     }
     palette_choose(0);

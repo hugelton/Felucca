@@ -1594,7 +1594,7 @@ static int test_display_preferences(void)
     settings.palette = 5; palette_set(5);
     press(B_OCTUP);
     bad += check("COLOR OCT+ previews the next palette (PAPER, light) without closing the menu",
-                 settings.palette == 6 && T_BG == UI_PALETTES[6].bg && ux.light && ui.menu == 1 && !song.octave &&
+                 settings.palette == 6 && T_BG == UI_PALETTES[6].c1 && ux.light && ui.menu == 1 && !song.octave &&
                  memcmp(before, host_screen, sizeof before) && !memcmp(sounds, trk, sizeof sounds));
     turn(EN_K1, 1);
     bad += check("COLOR KNOB 1 steps on to HI-CON, NIGHT (#50: true black), MONO (1.0.2: black and white), then wraps to GREY",
@@ -1991,17 +1991,25 @@ static int test_information(void)
     return bad;
 }
 
-/* GREY is grayscale on every screen: every page of every engine, HOME, the menu, ABOUT, the dialogs (RGB565 gray:
+/* GREY is grayscale (but its primary and secondary, drawn gray here) on every screen: every page of every engine, HOME, the menu, ABOUT, the dialogs (RGB565 gray:
  * R = B, G = 2 R). MONO (black and white, blended per channel) is neutral on every screen: R = B, G within 2 of 2 R
  * (the 5-6-5 rounding of its edges) */
 static int screen_gray(void)
 {
     uint32_t i;
+    uint16_t acc = ux.accent, rec = ux.rec;
+    if (ux.mono) {                                  /* GREY's two colours (secondary, primary) are drawn gray for this check */
+        ux.accent = ux.rec = ux.text; ux.gen++;
+        ui.force = 1; ui_draw();
+    }
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = swap16(host_screen[i]);
-        if ((c >> 11) != (c & 31u) || ((c >> 5) & 63u) != (c >> 11) * 2u)
+        if ((c >> 11) != (c & 31u) || ((c >> 5) & 63u) != (c >> 11) * 2u) {
+            ux.accent = acc; ux.rec = rec; ux.gen++; ui.force = 1;
             return 0;
+        }
     }
+    ux.accent = acc; ux.rec = rec; ux.gen++; ui.force = 1;
     return 1;
 }
 static int screen_neutral(void)

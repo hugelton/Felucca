@@ -348,7 +348,7 @@ static void nm_draw_field(void)
     cv_text_on(9, 2, &AF_S, b, T_MID, T_SURF);
     fmt_int(b, nm.len);
     str_cpy(b + str_len(b), "/12", 4);
-    cv_text_r(231, 2, &AF_S, b, nm.len >= NM_LEN ? T_ACCENT : T_DIM, T_SURF);
+    cv_text_r(231, 2, &AF_S, b, nm.len >= NM_LEN ? T_WARN : T_DIM, T_SURF);
     if (nm.kind <= NK_USER_RENAME)                     /* USER: the category KNOB 3 sets, left of the count */
         cv_text_r(231 - text_w(&AF_S, b) - 10, 2, &AF_S, CAT_NAME[nm.cat % CAT_N], T_THEME, T_SURF);
     for (i = 0; i < NM_LEN; i++) {

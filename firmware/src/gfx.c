@@ -20,7 +20,7 @@ typedef struct {
     uint8_t psh;                        /* log2 of the phases per glyph: g[i << psh] .. g[(i << psh) + phases - 1] */
     const uint8_t *hc;                  /* data's Huffman code (cv_alpha_hc), 0 = 2 px per byte (cv_alpha) */
 } aafont_t;
-typedef struct { const char *name; uint16_t bg, surf, text, theme, accent; } ui_pal_t;
+typedef struct { const char *name; uint16_t c1, c2, c3, primary, secondary; } ui_pal_t;
 typedef struct { uint16_t off; uint8_t w; const char *label; } kc_t;
 #include "ui_fonts.h"                   /* AF_S 12 px / 400, AF_M 15 px / 500, AF_L 28 px / 600 */
 #include "ui_palettes.h"
@@ -79,8 +79,10 @@ static uint8_t cv_flip;          /* cv_alpha_hc: the cell mirrored left <-> righ
 #define RGB(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
 
 /* ------------------------------------------------------------- theme --- */
-/* Five stored colours per palette, the rest derived with fixed blends (tools/gen_ui_palettes.py) */
+/* Five stored colours per palette (color1 color2 color3 primary secondary), the rest derived with fixed blends
+ * (tools/gen_ui_palettes.py) */
 static struct {
+    uint16_t pal[5];             /* the five as stored: color1 color2 color3 primary secondary (the editor shows them) */
     uint16_t bg, surf, text, theme, accent;
     uint16_t mid, dim, line, sel, tint, ink, rec, raise, key, lane, grid;
     uint8_t light, mono;
@@ -104,7 +106,8 @@ static struct {
 #define T_SEL ux.sel             /* selection and gauge fill */
 #define T_TINT ux.tint           /* a faint theme area */
 #define T_INK ux.ink             /* text on T_SEL / T_THEME */
-#define T_REC ux.rec             /* REC: fixed red (GREY, MONO: the accent) */
+#define T_REC ux.rec             /* REC: the palette's primary (red; MONO: white) */
+#define T_WARN ux.rec            /* a warning (low battery, a full name): the primary too */
 #define T_RAISE ux.raise         /* a raised area on a surface: stubs, guides, slots, chips, button wells */
 #define T_KEY ux.key             /* a keycap's fill (its label: T_INK; unavailable: a T_DIM fill) */
 #define T_LANE ux.lane           /* the piano roll: an in-scale row (SURF -> THEME 10 %) */
@@ -135,40 +138,44 @@ static uint32_t ux_luma(uint16_t c)        /* 0..255 */
 /* 1.6 (#244): a palette of the user's, the 11th (index NPALETTES, "CUSTOM"): the same five stored colours, the rest
  * derived as for every palette, set from the editor (ui.c cpal_*; settings: favorites.factory[15][0..9, 12]). Not GREY
  * (no gray ramps) and not MONO: the channels blend as they are */
-static ui_pal_t ux_cust = {"CUSTOM", 0x0841, 0xCE59, 0xEF5D, 0xFFDF, 0xFD20};
-/* the five colours as stored (RGB565, 16 bits little endian each: BG SURF TEXT THEME ACCENT) */
+static ui_pal_t ux_cust = {"CUSTOM", 0x0841, 0xFFDF, 0xEF5D, UI_REC_DARK, 0xFD20};
+/* the five colours as stored (RGB565, 16 bits little endian each: color1 color2 color3 primary secondary) */
 static void palette_custom_load(const uint8_t *b)
 {
-    ux_cust.bg = (uint16_t)(b[0] | b[1] << 8);
-    ux_cust.surf = (uint16_t)(b[2] | b[3] << 8);
-    ux_cust.text = (uint16_t)(b[4] | b[5] << 8);
-    ux_cust.theme = (uint16_t)(b[6] | b[7] << 8);
-    ux_cust.accent = (uint16_t)(b[8] | b[9] << 8);
+    ux_cust.c1 = (uint16_t)(b[0] | b[1] << 8);
+    ux_cust.c2 = (uint16_t)(b[2] | b[3] << 8);
+    ux_cust.c3 = (uint16_t)(b[4] | b[5] << 8);
+    ux_cust.primary = (uint16_t)(b[6] | b[7] << 8);
+    ux_cust.secondary = (uint16_t)(b[8] | b[9] << 8);
 }
 
 static void palette_set(uint32_t i)
 {
     int cust = i == NPALETTES;
     const ui_pal_t *p = cust ? &ux_cust : &UI_PALETTES[i % NPALETTES];
+    uint16_t surf;
     i %= NPALETTES;
     ux.mono = !cust && i == UI_GREY_INDEX;
-    ux.bg = p->bg; ux.surf = ux.style ? p->bg : p->surf; ux.text = p->text; ux.theme = p->theme; ux.accent = p->accent;
-    ux.mid = ux_mix(p->bg, p->text, UI_MID_PCT);
-    ux.dim = ux_mix(p->bg, p->text, UI_DIM_PCT);
-    ux.line = ux_mix(p->bg, p->text, UI_LINE_PCT);
-    ux.sel = ux_mix(p->bg, p->theme, UI_SEL_PCT);
-    ux.tint = ux_mix(p->bg, p->theme, UI_TINT_PCT);
-    ux.ink = p->bg;
-    ux.raise = ux_mix(p->surf, p->text, UI_RAISE_PCT);
-    ux.key = ux_mix(p->bg, p->text, UI_KEY_PCT);
-    ux.lane = ux_mix(ux.surf, p->theme, 10);
-    ux.grid = ux_mix(ux.surf, p->text, 6);
-    ux.light = ux_luma(p->bg) > 128u;
-    ux.rec = ux.mono ? p->accent : ux.light ? UI_REC_LIGHT : UI_REC_DARK;
+    ux.pal[0] = p->c1; ux.pal[1] = p->c2; ux.pal[2] = p->c3; ux.pal[3] = p->primary; ux.pal[4] = p->secondary;
+    ux.bg = p->c1; ux.text = p->c3; ux.theme = p->c2; ux.accent = p->secondary; ux.rec = p->primary;
+    ux.mono = !cust && i == UI_GREY_INDEX;
+    ux.mid = ux_mix(ux.bg, ux.text, UI_MID_PCT);
+    ux.dim = ux_mix(ux.bg, ux.text, UI_DIM_PCT);
+    ux.line = ux_mix(ux.bg, ux.text, UI_LINE_PCT);
+    ux.sel = ux_mix(ux.bg, ux.theme, UI_SEL_PCT);
+    ux.tint = ux_mix(ux.bg, ux.theme, UI_TINT_PCT);
+    ux.ink = ux.bg;
+    surf = !cust && i == UI_BW_INDEX ? ux.bg : ux_mix(ux.bg, ux.theme, UI_SURF_PCT);   /* the card colour (MONO: black) */
+    ux.surf = ux.style ? ux.bg : surf;
+    ux.raise = ux_mix(surf, ux.text, UI_RAISE_PCT);
+    ux.key = ux_mix(ux.bg, ux.text, UI_KEY_PCT);
+    ux.lane = ux_mix(ux.surf, ux.theme, 10);
+    ux.grid = ux_mix(ux.surf, ux.text, 6);
+    ux.light = ux_luma(ux.bg) > 128u;
     if (!cust && i == UI_BW_INDEX) {             /* MONO: black and white, set, not blended (tools/gen_ui_palettes.py) */
-        ux.mid = ux.sel = ux.key = ux.rec = p->text;   /* a selection, a keycap, REC: white, its INK black */
+        ux.mid = ux.sel = ux.key = p->c3;        /* a selection, a keycap: white, its INK black */
         ux.dim = ux.line = ux.raise = ux.lane = UI_BW_GREY;   /* the one grey: inactive, tracks, wells */
-        ux.tint = ux.grid = p->bg;
+        ux.tint = ux.grid = p->c1;
     }
     ux.gen++;                                    /* the text ramps change with the coverage curve */
 }

@@ -3,7 +3,7 @@
 /* CUSTOM, the user's palette, for the editor (1.6, #244, Discussion #239; EDITOR_PROTOCOL.md "CUSTOM palette"; INFO 45 01 5):
  * PALETTE_GET reads it, PALETTE_SET shows five colours at once (a preview, RAM only), stores them (the palette in use from
  * then on, saved with the settings), removes it or goes back to the stored one. The colours are the five a palette stores
- * (BG SURF TEXT THEME ACCENT), each as three 7-bit bytes (red 0..31, green 0..63, blue 0..31 of RGB565); the rest of the
+ * (color1 color2 color3 primary secondary), each as three 7-bit bytes (red 0..31, green 0..63, blue 0..31 of RGB565); the rest of the
  * tokens is derived as for every palette (gfx.c palette_set). Colours that are hard to read are not refused: the editor warns
  * (its rule, EDITOR_PROTOCOL.md), the device keeps what it is given. A way back is always there: PALETTE_SET op 2, or MENU >
  * DISPLAY > COLOR, the first row of the first tab */
@@ -13,7 +13,8 @@ enum { ED_PALETTE_GET = 80, ED_PALETTE_SET };
  * palette in use (a place to start from) */
 static void ed_palette_body(void)
 {
-    const uint16_t *tok = &ux.bg;                      /* (BG SURF TEXT THEME ACCENT in a row) */
+    const uint16_t *tok = ux.pal;                      /* (color1 color2 color3 primary secondary) */
+    cpal_fix();
     uint32_t i, stored = (ui_cpal_flags & CPAL_STORED) != 0u;
     ed_b(ui_cpal_flags & (CPAL_STORED | CPAL_ACTIVE));
     ed_b(ED_PAL_N);
@@ -40,7 +41,7 @@ static int ed_palette_handle(uint32_t cmd, const uint8_t *a, uint32_t n)
             c[i] = (uint16_t)(a[1 + 3 * i] << 11 | a[2 + 3 * i] << 5 | a[3 + 3 * i]);
         }
         if (!rc && a[0] == 0u) {                       /* preview: gfx.c's copy only, nothing stored */
-            ux_cust.bg = c[0]; ux_cust.surf = c[1]; ux_cust.text = c[2]; ux_cust.theme = c[3]; ux_cust.accent = c[4];
+            ux_cust.c1 = c[0]; ux_cust.c2 = c[1]; ux_cust.c3 = c[2]; ux_cust.primary = c[3]; ux_cust.secondary = c[4];
             palette_set(NPALETTES);
             ui.force = 1;
         } else if (!rc) {

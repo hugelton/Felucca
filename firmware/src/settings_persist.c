@@ -58,10 +58,10 @@ static int settings_import(persist_t *p, int n)
     if (p->favorites.factory[15][11] > 8u)         /* PRESETS LIST's category (1.2, ui.c ui_lcat, CAT_*): unknown = none */
         p->favorites.factory[15][11] = 0;
     /* [15][26] HOME (1.3, ui.c ui_home_view): kept as saved; a value this firmware does not know draws SCOPE */
-    {   /* CUSTOM (1.6, #244, favorites.c ui_cpal): [15][0..9] five RGB565 colours, [12] bit 0 stored, bit 1 in use. Anything else
+    {   /* CUSTOM (1.6, #244, favorites.c ui_cpal): [15][0..9] five RGB565 colours, [12] bit 0 stored, bit 1 in use, bit 2 the 1.7 layout. Anything else
          * in [12], or colours without the stored flag: none (zero). The colours themselves are whatever the user chose */
         uint8_t *f = p->favorites.factory[15];
-        f[12] &= 3u;
+        f[12] &= 7u;           /* (bit 2: the five are color1 color2 color3 primary secondary, 1.7; without it: BG SURF TEXT THEME ACCENT, favorites.c cpal_fix) */
         if (!(f[12] & 1u)) {
             memset(f, 0, 10);
             f[12] = 0;
