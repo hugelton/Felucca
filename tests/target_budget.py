@@ -36,11 +36,11 @@ FUNCS = ["analog_render", "digital_render", "digital_render_legacy", "digital_re
 # built only with FELUCCA_FM4=1 (DIGITAL, src/eng_digital.c; not in the default build, so not in BUDGET): absent,
 # they are skipped; present, checked against these (their budget lines until the engine was retired in 1.0)
 OPTIONAL = {"digital_render": 12, "digital_render_legacy": 333, "digital_render_custom": 558,
-            "uac_tap48": 504,           # (absent from a FELUCCA_UAC_48K=0 or FELUCCA_UAC=0 build)
-            "mix_part": 3549,
-            "adp_render": 6333, "adp_block": 102, "adp_post": 309}   # (ADPCM: built only with FELUCCA_ADPCM=1)           # (bsp/chip/libc.c: the word-wise memset / memcpy, longer loops, faster; FELUCCA_CPU2=1, the default since 1.6.1: out of line, either core may run it)
+            "uac_tap48": 507,           # (absent from a FELUCCA_UAC_48K=0 or FELUCCA_UAC=0 build)
+            "mix_part": 1754,
+            "adp_render": 2577, "adp_block": 102, "adp_post": 309}   # (ADPCM: built only with FELUCCA_ADPCM=1)           # (bsp/chip/libc.c: the word-wise memset / memcpy, longer loops, faster; FELUCCA_CPU2=1, the default since 1.6.1: out of line, either core may run it)
 # a FELUCCA_CPU2=0 build (no mix_part: inlined into the audio ISR, as 1.6) has the one-core ISR, checked against this
-ONE_CORE = {"fm1_alnk0_irq": 37502}
+ONE_CORE = {"fm1_alnk0_irq": 13782}
 TOL = 0.10                      # exact (no noise): small edits pass, a grown render loop does not
 DIV_W = 8                       # a divide weighs 1 + 8 instructions
 NEST = 4                        # an instruction in a loop inside a loop weighs 4, two deep 16, ...
@@ -71,9 +71,29 @@ def functions(path):
     return out
 
 
+def spans(heads):
+    """the loops of {head: end}: spans that overlap without one holding the other are one loop entered at two
+    heads (the compiler's layout: a rarely taken path branching back to a little before the loop's head), joined
+    into one; only a span inside another is a loop nested in it"""
+    out = []
+    for h, e in sorted(heads.items()):
+        i = 0
+        while i < len(out):
+            h0, e0 = out[i]
+            if h0 < h <= e0 < e or h < h0 <= e < e0:
+                del out[i]
+                h, e = min(h, h0), max(e, e0)
+                i = 0
+            else:
+                i += 1
+        out.append((h, e))
+    return out
+
+
 def cost(insns):
-    """loops: one span per loop head (the farthest backward branch to it); an instruction inside d
-    spans weighs NEST ** (d - 1) (an inner loop runs several times per pass of the outer one)"""
+    """loops: one span per loop head (the farthest backward branch to it), spans that only overlap joined
+    (spans()); an instruction inside d spans weighs NEST ** (d - 1) (an inner loop runs several times per pass
+    of the outer one)"""
     lo = insns[0][0]
     heads = {}
     for a, t in insns:
@@ -81,10 +101,11 @@ def cost(insns):
         if m and lo <= int(m.group(1), 16) < a:
             h = int(m.group(1), 16)
             heads[h] = max(heads.get(h, a), a)
+    loops = spans(heads)
     n = divs = calls = 0
     w = 0
     for a, t in insns:
-        d = min(sum(1 for h, e in heads.items() if h <= a <= e), MAXD)
+        d = min(sum(1 for h, e in loops if h <= a <= e), MAXD)
         if not d:
             continue
         k = NEST ** (d - 1)
