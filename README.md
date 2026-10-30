@@ -19,6 +19,9 @@ Installing is at your own risk: M-VAVE's updater or the installer's **Return to 
 - Edit: [web editor](https://hugelton.github.io/Felucca/webapp/editor/) ([Felucca-WebApp](https://github.com/hugelton/Felucca-WebApp))
 - Read: the manual and the release notes are in the [wiki](https://github.com/hugelton/Felucca/wiki/Home)
 - Build: [BUILDING.md](BUILDING.md)
+- Platforms: the FM-1 (the reference; every release is tested on it) · the browser (`web/emu`) · a desktop with SDL2
+  (beta, run on macOS so far; Linux next: [platforms/linux](platforms/linux/README.md)). The same sources on each: what a platform does not
+  have (the FM-1's panel, USB, its flash) is given by its own files under `platforms/`.
 - Related: [Felucca-Engines](https://github.com/hugelton/Felucca-Engines) (the ANALOG, LOFI, TRIO, WHEEL, NOISE and PHASE engines, MIT; still maintained) ·
   [felucca-bsp](https://github.com/hugelton/felucca-bsp) (the FM-1 hardware layer, MPL-2.0; Felucca builds on it from 1.7.0)
 
