@@ -30,7 +30,11 @@ Installing is at your own risk: M-VAVE's updater or the installer's **Return to 
 | Platform | Status | Notes |
 | --- | --- | --- |
 | M-VAVE FM-1 | Supported | The original platform; firmware and web installer available. |
-| Other hardware | Not yet supported | Ports are welcome! |
+| Browser | Supported | [Try it](https://hugelton.github.io/Felucca/webapp/try/), no FM-1 needed. |
+| Desktop (SDL2) | Beta | Source only, in [platforms/linux](platforms/linux/README.md); run on macOS so far, Linux next. |
+| M5Stack CoreS3 | In progress | Runs on the device; not published yet. |
+| M-VAVE SMK-37 | Proposed | A board in [felucca-bsp#13](https://github.com/hugelton/felucca-bsp/issues/13); untested. |
+| Other hardware | Not yet supported | Ports are welcome! Linux-based devices: see the [FAQ](https://github.com/hugelton/Felucca/wiki/FAQ). |
 
 Felucca began on the FM-1, but it is not intended to stay there. Contributions and ports to other platforms are very welcome. If you are interested in bringing Felucca to another device, feel free to open an issue or pull request to discuss it. No specific future ports or release dates are promised.
 
