@@ -857,7 +857,7 @@ static int pc_test(void)
     pc(0, 1); frame();
     ok &= t->preset == 1;
     hold(B_SAVE);
-    ok &= same_sound(t, &was) && msg_is("UNDO/REDO T1");
+    ok &= same_sound(t, &was) && msg_is("UNDO/REDO T1 SOUND");
     bad += check("  two before a frame: the last loads; a run of PCs is one undo (SAVE held: the sound before)", ok);
 
     /* the editor: a RELOAD for the selected track only */

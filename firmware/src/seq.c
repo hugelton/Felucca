@@ -50,6 +50,8 @@ static volatile uint8_t kb_asleep;       /* MENU > SCREEN OFF (ui.c): the screen
 static uint8_t last_note = 60;
 static volatile uint8_t transport_req;   /* 1 start, 2 stop, 3 restart (from the UI) */
 static volatile uint8_t panic_req;       /* bit per track: release every sounding note (preset / engine change) */
+static volatile uint8_t clock_lost;      /* 1.8: an external clock (G_CLOCK 1 USB, 2 TRS) stopped coming: the play
+                                          * stopped (the UI says so) */
 static volatile uint8_t midi_hint;       /* MIDI IN played track n - 1, which is not the selected one (the UI says so) */
 static volatile uint8_t midi_seen;       /* 1.5.5 (#208): bit per track, a MIDI IN note-on played it since the UI last
                                           * looked (ui_input.c midi_follow: the track's light, AUTO SELECT;
@@ -1469,6 +1471,7 @@ static void events_block(uint32_t n)
             if (fm1_ms - last > 500u) {
                 seq_stop();                         /* cable loss must not leave a running held note */
                 midi_clock.tempo_valid = 0;
+                clock_lost = (uint8_t)clock_mode;
             } else
                 seq_n = midi_clock_advance(fm1_ms);
         }

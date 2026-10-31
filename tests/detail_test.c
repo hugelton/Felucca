@@ -181,13 +181,13 @@ static int knobs(void)
     go_detail();
     ui.msg_t = 0;
     kt(EN_K3, 2);
-    ok = msg_is("QUANTIZE IS ON") && step_nudge(&trk[0].step[2]) == 2;
+    ok = msg_is("QUANTIZE ON: SEQ>AUTO") && step_nudge(&trk[0].step[2]) == 2;
     t = &trk[0];
     t->step[2].flags |= SF_ACCENT;
     ui.msg_t = 0;
     kt(EN_K4, -2);
     ok &= msg_is("ACC PLAYS 127") && t->step[2].vel == 94u;
-    bad += check("  NUDGE with QUANTIZE ON: QUANTIZE IS ON (kept); VEL on an ACC step: ACC PLAYS 127 (kept)", ok);
+    bad += check("  NUDGE with QUANTIZE ON: QUANTIZE ON: SEQ>AUTO (kept); VEL on an ACC step: ACC PLAYS 127 (kept)", ok);
 
     pattern(0);
     go_detail();

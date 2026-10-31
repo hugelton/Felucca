@@ -446,8 +446,8 @@ static int test_sound_loads(void)
                  undo.p[P_E0 + 1] == before.p[P_E0 + 1] && undo.eng == before.eng_req && undo.preset == before.preset);
     t->step[0].note[0] = 99;                      /* recorded after the loads */
     hold(B_SAVE);
-    bad += check("SAVE held: the sound back (UNDO/REDO T1); steps recorded since stay", same_sound(t, &before) &&
-                 t->step[0].note[0] == 99 && msg_is("UNDO/REDO T1"));
+    bad += check("SAVE held: the sound back (UNDO/REDO T1 SOUND); steps recorded since stay", same_sound(t, &before) &&
+                 t->step[0].note[0] == 99 && msg_is("UNDO/REDO T1 SOUND"));
     bad += check("SAVE held does not open the SAVE pages", ui.home);
     hold(B_SAVE);
     bad += check("SAVE held again: the loads again (redo)", t->eng_req != before.eng_req && t->step[0].note[0] == 99);
@@ -3356,7 +3356,7 @@ static int test_layer(void)
     ok = transport_req == 1u && ui.layer == LAYER_FX;
     transport_req = 0;
     press(B_SAVE); ok &= ui.home;
-    hold(B_SAVE); ok &= !msg_is("UNDO/REDO T1") && ui.home;
+    hold(B_SAVE); ok &= !(ui.msg_t && !memcmp(ui.msg, "UNDO/REDO", 9)) && ui.home;
     press(B_ENV); ok &= ui.home;
     hold(B_HOME); ok &= !ui.menu && ui.home;
     btn_up(B_FX); frame();
@@ -9172,7 +9172,7 @@ static int test_fm6_ops(void)
           fm6_patch[tr][at] == before[at] - 7u && slot_own() && fop_op == 2u;
     bad += check("FM6 ops: OPERATOR KNOB 4 on OP 3: its LEVEL byte only; F5 -> SLOT OWN", ok);
     hold(B_SAVE);
-    ok = !memcmp(before, fm6_patch[tr], FP_SIZE) && TSEL->p[P_E7] == 4 && fm6_slot[tr] == 4u && msg_is("UNDO/REDO T2");
+    ok = !memcmp(before, fm6_patch[tr], FP_SIZE) && TSEL->p[P_E7] == 4 && fm6_slot[tr] == 4u && msg_is("UNDO/REDO T2 SOUND");
     hold(B_SAVE);
     ok &= fm6_patch[tr][3u * FP_OP + FP_OL] == before[3u * FP_OP + FP_OL] - 7u && slot_own();
     frames(1600);
@@ -9909,6 +9909,89 @@ static int test_edit_quick_actions(void)
     return bad;
 }
 
+/* 1.8 (the UX audit): steps edited by hand are undone themselves (not the load before them), PLAY stops from the menu
+ * and a dialog, DELETE SECTION names the section, an external clock lost says so */
+static int test_ux18(void)
+{
+    int bad = 0, ok;
+    char qa[24], qb[24];
+    track_t *t;
+    ui_power_on();
+    song.sel = 0; t = TSEL;
+    go_home(); frame();
+    turn(EN_PRESET, 1);                              /* a sound load: the undo's copy */
+    {
+        uint8_t eng = t->eng_req, pr = t->preset;
+        go_title("STEP");
+        ui.cursor = 2;
+        t->step[2].time = ST_NOTE; t->step[2].n = 1; t->step[2].note[0] = 60;
+        turn(EN_K2, 2); turn(EN_K2, 1);              /* NOTE, one gesture */
+        ok = t->step[2].note[0] == 63;
+        hold(B_SAVE);
+        ok &= t->step[2].note[0] == 60 && t->eng_req == eng && t->preset == pr && msg_is("UNDO/REDO T1 STEPS");
+        hold(B_SAVE);
+        ok &= t->step[2].note[0] == 63;
+        bad += check("1.8 STEP: KNOB 2 on a step, SAVE held: the note back (not the sound loaded before), again redoes", ok);
+    }
+    ui_power_on();
+    song.sel = 0; t = TSEL;
+    go_title("STEP");
+    song.rec = 1u; ui.cursor = 0;                    /* armed, stopped: step entry */
+    tap_key(white(3));
+    ok = step_on(&t->step[0]) && ui.cursor == 1u;
+    hold(B_SAVE);
+    ok &= !step_on(&t->step[0]) && msg_is("UNDO/REDO T1 STEPS");
+    song.rec = 0;
+    bad += check("1.8 STEP: a step entered by the keys, SAVE held takes it out", ok);
+    ui_power_on();
+    song.sel = 3; t = TSEL;                          /* T4: DRUM */
+    go_title("STEP");
+    ok = drum_track(t);
+    {
+        uint32_t i, was = 0;
+        for (i = 0; i < 4u; i++)
+            was |= step_lanes(&t->step[i]) & (1u << ui.lane);
+        tap_key(white(1)); tap_key(white(2));        /* two hits on one lane in a row: one undo */
+        ok &= !was && ((step_lanes(&t->step[1]) | step_lanes(&t->step[2])) >> ui.lane & 1u);
+        hold(B_SAVE);
+        ok &= !((step_lanes(&t->step[1]) >> ui.lane) & 1u) && !((step_lanes(&t->step[2]) >> ui.lane) & 1u);
+    }
+    bad += check("1.8 DRUM grid: hits put in a row, SAVE held takes them out together", ok);
+
+    ui_power_on();
+    ui.menu = 1; song.playing = 1; transport_req = 0;
+    press(B_PLAY);
+    ok = transport_req == 2u && ui.menu;
+    song.playing = 0; transport_req = 0;
+    press(B_PLAY);
+    ok &= transport_req == 0u && ui.menu;
+    ui.menu = 0; ui.confirm = CF_CLEAR_SONG; song.playing = 1;
+    press(B_PLAY);
+    ok &= transport_req == 2u && ui.confirm == CF_CLEAR_SONG;
+    ui.confirm = 0; song.playing = 0; transport_req = 0;
+    bad += check("1.8 PLAY stops from the menu and a dialog (they stay), starts nothing there", ok);
+
+    ui_power_on();
+    chain_config.count = 2;
+    chain_config.row[1].slot[0] = 0; chain_config.row[1].slot[1] = 0;
+    chain_config.row[1].slot[2] = 1; chain_config.row[1].slot[3] = CHAIN_SILENT;
+    chain_config.row[1].repeat = 4;
+    ui.confirm = CF_DEL_ROW; ui.confirm_trk = 1;
+    confirm_text(qa, qb);
+    ok = str_eq(qa, "DELETE SECTION 2?") && str_eq(qb, "A A B - X4");
+    ui.confirm = CF_INIT_SOUND; ui.confirm_trk = 2;
+    confirm_text(qa, qb);
+    ok &= str_eq(qa, "INITIALIZE T3 SOUND?");
+    ui.confirm = 0; chain_defaults(&chain_config);
+    bad += check("1.8 dialogs: DELETE SECTION 2? with its slots and repeats; INITIALIZE T3 SOUND?", ok);
+
+    ui_power_on();
+    clock_lost = 2; frame();
+    ok = msg_is("NO CLOCK (TRS)") && !clock_lost;
+    bad += check("1.8 an external clock lost: NO CLOCK (TRS)", ok);
+    return bad;
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -9996,6 +10079,7 @@ int main(void)
     bad += test_fx_map_columns();
     bad += test_help();
     bad += test_no_flash();
+    bad += test_ux18();
 #if FELUCCA_FM4
     bad += test_fm_charts();                        /* (DIGITAL's charts: built with FELUCCA_FM4=1 only) */
 #else

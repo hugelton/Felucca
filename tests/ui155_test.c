@@ -309,7 +309,7 @@ static int project_erase_ui(void)
     turn(EN_K3, 1);
     ok &= ui.act == 3u && str_eq(act_name(2), "LOAD");
     go_page(GR_SLOTS);
-    ok &= help_page() && str_eq(help_page(), "[K2]ERASE[K4]SAVE[EDIT]NAME") && help_fits(help_page());
+    ok &= help_page() && str_eq(help_page(), "[K2]ERASE[K3]LOAD[K4]SAVE") && help_fits(help_page());
     bad += check("  not while playing (STOP TO ERASE); LOAD and SAVE where they were; its HELP hint", ok);
     return bad;
 }
@@ -443,13 +443,13 @@ static int clean_init(void)
     ok = ui.confirm == CF_CLEAN_SOUND && LY_CLEAN == LY_INIT + 1u && LY_CLEAN < 16u;
     key_up(white(LY_CLEAN)); btn_up(B_EDIT); frame();
     confirm_text(a, b);
-    ok &= str_eq(a, "CLEAN INIT SOUND?") && str_eq(b, "NO FX, NO MOD");
+    ok &= str_eq(a, "CLEAN INIT T1 SOUND?") && a[12] == (char)('1' + song.sel) && str_eq(b, "NO FX, NO MOD");
     dress(TSEL);
     press(B_OCTUP);
     ok &= msg_is("CLEAN INIT") && clean_is(TSEL, TSEL->eng_req, 77, -30);
     go_page(GR_TOOLS);
     ok &= str_eq(help_page(), "[K1]CLEAR[K2]INIT, CLEAN[OCT+]DO") && help_fits(help_page());
-    bad += check("  EDIT + the key after INIT (F5): the dialog \"CLEAN INIT SOUND?\"; TOOLS' HELP hint", ok);
+    bad += check("  EDIT + the key after INIT (F5): the dialog \"CLEAN INIT T1 SOUND?\"; TOOLS' HELP hint", ok);
     return bad;
 }
 

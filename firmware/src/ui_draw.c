@@ -1455,6 +1455,7 @@ static void confirm_text(char *a, char *b)
     case CF_CLEAR_TRK:
         str_cpy(a, "CLEAR TRACK 1?", 24);
         a[12] = (char)('1' + k % NTRK);
+        str_cpy(b, "STEPS AND AUTOMATION", 24);      /* (1.8: the automation goes too) */
         break;
     case CF_OVR_PROJ:
         str_cpy(a, "OVERWRITE PROJECT A?", 24);
@@ -1462,17 +1463,31 @@ static void confirm_text(char *a, char *b)
         if (!project_name(k & 3u, b) || !b[0])          /* the project's name, else what SONG plays from it */
             str_cpy(b, "SONG PATTERN CHANGES", 24);
         break;
-    case CF_DEL_ROW:
-        str_cpy(a, "DELETE SECTION?", 24);
+    case CF_DEL_ROW:                                 /* 1.8: its number, the slots it plays, its repeats */
+        str_cpy(a, "DELETE SECTION ", 24);
+        fmt_int(a + str_len(a), (int32_t)k + 1);
+        str_cpy(a + str_len(a), "?", 2);
+        if (k < chain_config.count) {
+            const chain_row_t *r = &chain_config.row[k];
+            uint32_t j;
+            for (j = 0; j < NTRK; j++) {
+                b[2 * j] = r->slot[j] < CHAIN_SILENT ? (char)('A' + r->slot[j]) : '-';
+                b[2 * j + 1] = ' ';
+            }
+            b[2 * NTRK] = 'X';
+            fmt_int(b + 2 * NTRK + 1, r->repeat);
+        }
         break;
     case CF_CLEAR_SONG:
         str_cpy(a, "CLEAR SONG ORDER?", 24);
         break;
     case CF_INIT_SOUND:
-        str_cpy(a, "INITIALIZE SOUND?", 24);
+        str_cpy(a, "INITIALIZE T1 SOUND?", 24);       /* (1.8: the track) */
+        a[12] = (char)('1' + k % NTRK);
         break;
     case CF_CLEAN_SOUND:                             /* 1.5.5 (#190): the basic sound, nothing added */
-        str_cpy(a, "CLEAN INIT SOUND?", 24);
+        str_cpy(a, "CLEAN INIT T1 SOUND?", 24);
+        a[12] = (char)('1' + k % NTRK);
         str_cpy(b, "NO FX, NO MOD", 24);
         break;
     case CF_LEARN_CLEAR:                             /* 1.8: MENU > MIDI > LEARN CLEAR */
@@ -1519,6 +1534,7 @@ static void confirm_text(char *a, char *b)
     default:
         str_cpy(a, "CLEAR T1 SEQUENCE?", 24);     /* the header (T1..T4) is hidden */
         a[7] = (char)('1' + k % NTRK);
+        str_cpy(b, "STEPS AND AUTOMATION", 24);      /* (1.8: the automation goes too) */
         break;
     }
 }
