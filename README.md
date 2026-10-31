@@ -10,7 +10,7 @@ Originally developed for a single instrument, Felucca is evolving toward a multi
 
 ### M-VAVE FM-1
 
-The FM-1 firmware is currently at version 1.7.0. Connect the FM-1 to a computer by USB, open the
+The FM-1 firmware is currently at version 1.8.0. Connect the FM-1 to a computer by USB, open the
 [web installer](https://hugelton.github.io/Felucca/) in Chrome or Edge and press Install; no extra hardware is needed.
 Installing is at your own risk: M-VAVE's updater or the installer's **Return to official V15** takes you back.
 [Try it in your browser](https://hugelton.github.io/Felucca/webapp/try/), no FM-1 needed.
