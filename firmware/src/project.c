@@ -884,6 +884,7 @@ static void project_capture(project_t *p)
 
 /* the music as it is now -> slot, named `name` (0: the current name; "" none); 0 saved, nonzero refused or failed.
  * The current name becomes the saved one */
+static void proj_kept_now(void);
 static int project_save_as(uint32_t slot, const char *name)
 {
     project_t *p = &proj_scratch;
@@ -909,6 +910,7 @@ static int project_save_as(uint32_t slot, const char *name)
         proj_name_get(proj_name, (const uint8_t *)p->name);
         proj_cur = (uint8_t)(slot & 3u);
         pat_from_set((slot & 3u) + 1u);
+        proj_kept_now();
         ui_message("SAVED");
         return 0;
     }
@@ -917,6 +919,7 @@ static int project_save_as(uint32_t slot, const char *name)
     proj_name_get(proj_name, (const uint8_t *)p->name);
     proj_cur = (uint8_t)(slot & 3u);
     pat_from_set((slot & 3u) + 1u);
+    proj_kept_now();
     ui_message("SAVED (RAM)");
     return 0;
 }
@@ -1125,6 +1128,7 @@ static int project_restore_runtime(const project_t *input)
     undo_depth--;
     sync_reload = 1;
     ui.force = 1;
+    proj_kept_now();
     ui_message("LOADED");
     memset(snd_said, 0, sizeof snd_said);               /* a missing sample is said again, after LOADED */
     return 0;
@@ -1362,6 +1366,12 @@ static uint32_t autosave_sig(void)
     return as_mix(h, proj_name, sizeof proj_name);
 }
 
+/* 1.8: the music as a stored project holds it, when it last was one (a PROJECT load or save, CLEAR ALL, power-on):
+ * PROJECT LOAD asks first when it has changed since (ui_input.c CF_LOAD_PROJ) */
+static uint32_t proj_kept;
+static void proj_kept_now(void) { proj_kept = autosave_sig(); }
+static int proj_changed(void) { return autosave_sig() != proj_kept; }
+
 /* nothing going on that an erase (the audio stopped ~40 ms) would be heard in, or would race */
 static int autosave_quiet(void)
 {
@@ -1430,6 +1440,7 @@ static int autosave_boot(int allowed)
 #endif
     as.saved = as.seen = autosave_sig();
     as.t = fm1_ms;
+    proj_kept_now();
     return rc;
 }
 

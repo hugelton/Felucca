@@ -1135,8 +1135,11 @@ static void act_do(void)
     if (id != G_LOAD)
         ui.act = 0;
     switch (id) {
-    case G_LOAD:
-        project_load(k);
+    case G_LOAD:                                          /* 1.8: over changes not saved, the dialog first */
+        if (project_used(k) && proj_changed())
+            confirm_open(CF_LOAD_PROJ, k);
+        else
+            project_load(k);
         break;
     case G_SAVE:                                          /* the NAME screen writes it */
         if (transport_busy())
@@ -1365,10 +1368,13 @@ static int page_tap(uint32_t b)
             lock_clear(held);
             return 1;
         }
+        step_undo_take(TSEL, 0);                         /* (1.8: SAVE held puts it back) */
         step_clear(&TSEL->step[ui.cursor]);
         (void)motion_clear_locks(TSEL, ui.cursor);
+        motion_undo_done(TSEL);
         cursor_set(ui.cursor + 1);
         ui_message("STEP CLEARED");
+        str_cpy(ui.msg2, "[SAVE] HOLD TO UNDO", sizeof ui.msg2);
         return 1;
     }
     if (b == B_EDIT && !ui.home && cur_page()->graph == GR_EVENTS) {   /* AUTOMATION: EDIT deletes the row's record */
@@ -1653,6 +1659,10 @@ static void ui_input(void)
                 if (!chain_busy()) { chain_defaults(&chain_config); ui.song_row = 0; ui_message("SONG CLEARED"); }
             } else if (kind == CF_INIT_SOUND) {
                 if (!chain_busy()) { set_engine(TSEL->eng_req); ui_message("SOUND INIT"); }
+            } else if (kind == CF_LEARN_CLEAR) {
+                ui_message(ml_clear_all() ? "LEARN CLEARED" : "NOTHING LEARNED");
+            } else if (kind == CF_LOAD_PROJ) {
+                project_load(ui.confirm_trk & 3u);
             } else if (kind == CF_CLEAR_ALL) {
                 (void)project_new();
             } else if (kind == CF_CLEAN_SOUND) {

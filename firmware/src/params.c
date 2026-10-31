@@ -83,6 +83,7 @@ static const char *const N_ENGNAME[] = {"ANALOG", FELUCCA_FM4 ? "DIGITAL" : "-",
 #endif
 };
 
+static const char *const N_SLOT[] = {"A", "B", "C", "D", 0};   /* G_SLOT 1..4 (F_INT: the names split its range) */
 #define PD(l, f, mn, mx, df) {l, f, mn, mx, df, 0, 0}
 #define PE(l, n, df) {l, F_ENUM, 0, (int16_t)(sizeof(n) / sizeof(n[0]) - 1), df, n, 0}
 
@@ -216,7 +217,7 @@ static const param_desc_t GP[G_COUNT] = {
      * stored with the project as before. (was "--": stored 0 = CH1-4, as MIDI IN always was) */
     [G_ROUTE] = PE("ROUT", N_ROUTE, 0),
     [G_INFO] = PD("CPU", F_INT, 0, 0, 0),
-    [G_SLOT] = PD("SLOT", F_INT, 1, 4, 1),
+    [G_SLOT] = {"SLOT", F_INT, 1, 4, 1, N_SLOT, 0},   /* 1.8: A..D as the list, the header and SONG (values 1..4) */
     [G_NAME] = PE("NAME", N_DASH, 0),
     [G_LOAD] = PE("LOAD", N_GO, 0),
     [G_SAVE] = PE("SAVE", N_GO, 0),
@@ -406,7 +407,7 @@ static void param_format(const param_desc_t *d, int32_t v, char *val, const char
         *unit = "st";
         break;
     case F_ENUM:
-        str_cpy(val, d->names[v < d->min ? d->min : v > d->max ? d->max : v], 6);
+        str_cpy(val, d->names[v < d->min ? d->min : v > d->max ? d->max : v], 7);
         if (d->unit)
             *unit = d->unit;
         break;
@@ -415,10 +416,10 @@ static void param_format(const param_desc_t *d, int32_t v, char *val, const char
         *unit = "BPM";
         break;
     case F_NOTE:
-        str_cpy(val, N_NOTE[v % 12], 6);
+        str_cpy(val, N_NOTE[v % 12], 7);
         break;
     case F_ONOFF:
-        str_cpy(val, N_ONOFF[v ? 1 : 0], 6);
+        str_cpy(val, N_ONOFF[v ? 1 : 0], 7);
         break;
     case F_STEPS:
         fmt_int(val, v);
@@ -429,7 +430,7 @@ static void param_format(const param_desc_t *d, int32_t v, char *val, const char
             uint32_t k = 0;                           /* split evenly over the names (engine desc hooks) */
             while (d->names[k])
                 k++;
-            str_cpy(val, d->names[(uint32_t)(clamp(v, d->min, d->max) - d->min) * k / (uint32_t)(d->max - d->min + 1)], 6);
+            str_cpy(val, d->names[(uint32_t)(clamp(v, d->min, d->max) - d->min) * k / (uint32_t)(d->max - d->min + 1)], 7);
         } else {
             fmt_int(val, v);
         }

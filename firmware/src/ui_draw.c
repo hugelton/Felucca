@@ -1475,6 +1475,16 @@ static void confirm_text(char *a, char *b)
         str_cpy(a, "CLEAN INIT SOUND?", 24);
         str_cpy(b, "NO FX, NO MOD", 24);
         break;
+    case CF_LEARN_CLEAR:                             /* 1.8: MENU > MIDI > LEARN CLEAR */
+        str_cpy(a, "CLEAR MIDI LEARN?", 24);
+        fmt_int(b, (int32_t)ml_count());
+        str_cpy(b + str_len(b), " CC GO", 8);
+        break;
+    case CF_LOAD_PROJ:                               /* 1.8: over changes not saved */
+        str_cpy(a, "LOAD PROJECT A?", 24);
+        a[13] = (char)('A' + (k & 3u));
+        str_cpy(b, "CHANGES NOT SAVED GO", 24);
+        break;
     case CF_CLEAR_ALL:                               /* 1.8 (#266): MENU > SYSTEM */
         str_cpy(a, "CLEAR ALL?", 24);
         str_cpy(b, "SAVED PROJECTS STAY", 24);

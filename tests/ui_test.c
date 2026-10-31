@@ -942,11 +942,25 @@ static int test_save(void)
     bad += check("OCT+ (YES): NAME, the slot not written yet", name_on() && stored_param(0, 0, P_E0) != 5);
     press(B_OCTUP);
     bad += check("OCT+ overwrites it", ui.confirm == CF_NONE && !name_on() && stored_param(0, 0, P_E0) == 5);
-    trk[0].p[P_LEVEL] = 11;
     turn(EN_K3, 1);
     press(B_OCTUP);
-    bad += check("KNOB 3 LOAD, OCT+: the project back; LOAD stays picked", trk[0].p[P_LEVEL] != 11 &&
-                 trk[0].p[P_LEVEL] == stored_param(0, 0, P_LEVEL) && msg_is("LOADED") && ui.act == 3u);
+    bad += check("KNOB 3 LOAD, OCT+, nothing changed since the save: loaded at once; LOAD stays picked",
+                 ui.confirm == CF_NONE && msg_is("LOADED") && ui.act == 3u);
+    trk[0].p[P_LEVEL] = 11;
+    press(B_OCTUP);
+    {
+        char qa[24], qb[24];
+        confirm_text(qa, qb);
+        bad += check("1.8 LOAD over changes not saved: the LOAD PROJECT A? dialog, nothing loaded yet",
+                     ui.confirm == CF_LOAD_PROJ && str_eq(qa, "LOAD PROJECT A?") && str_eq(qb, "CHANGES NOT SAVED GO") &&
+                     trk[0].p[P_LEVEL] == 11);
+    }
+    press(B_OCTDN);
+    bad += check("1.8   OCT- keeps the changes", ui.confirm == CF_NONE && trk[0].p[P_LEVEL] == 11);
+    turn(EN_K3, 1);
+    press(B_OCTUP); press(B_OCTUP);
+    bad += check("1.8   OCT+ (YES): the project back", trk[0].p[P_LEVEL] != 11 &&
+                 trk[0].p[P_LEVEL] == stored_param(0, 0, P_LEVEL) && msg_is("LOADED"));
     /* user presets */
     for (i = 0; i < NPAGES; i++)
         if (PAGES[i].graph == GR_USER)
@@ -2545,6 +2559,18 @@ static int test_chain(void)
                 ok &= !step_on(&trk[k].step[i]);
         }
         bad += check("#266 MENU > SYSTEM > CLEAR ALL asks, OCT- keeps, OCT+ a new project (no steps, automation, song)", ok);
+    }
+    {   /* 1.8: SEQ > STEP, EDIT clears the step: SAVE held puts it back */
+        int ok = 1;
+        ui_power_on();
+        go_title("STEP");
+        ui.cursor = 2;
+        TSEL->step[2].time = ST_NOTE; TSEL->step[2].n = 1;
+        press(B_EDIT);
+        ok &= !step_on(&TSEL->step[2]) && msg_is("STEP CLEARED") && str_eq(ui.msg2, "[SAVE] HOLD TO UNDO");
+        hold(B_SAVE);
+        ok &= step_on(&TSEL->step[2]);
+        bad += check("1.8 SEQ > STEP: EDIT clears the step, SAVE held puts it back", ok);
     }
     return bad;
 }
