@@ -1664,11 +1664,11 @@ static int test_menu_tabs(void)
             }
     }
     ui_prefs = 0;
-    bad += check("MENU tabs: DISPLAY CONTROL AUDIO MIDI SYSTEM (8 8 6 8 7 rows: 1.6.1 2ND CORE, a FELUCCA_CPU2=0 build SYSTEM 6; 1.5.5: SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), 1..8 each in a run, fit the page; tab gaps "
+    bad += check("MENU tabs: DISPLAY CONTROL AUDIO MIDI SYSTEM (8 8 6 8 8 rows: 1.6.1 2ND CORE, a FELUCCA_CPU2=0 build SYSTEM 7; 1.8: CLEAR ALL; 1.5.5: SELECT, T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE), 1..8 each in a run, fit the page; tab gaps "
                  "constant (S, LARGE)",
                  ok && MTAB_COUNT == 5u && str_eq(MTAB_NAME[0], "DISPLAY") && str_eq(MTAB_NAME[MTAB_MIDI], "MIDI") &&
                  mtab_rows(MTAB_DISPLAY) == 8u && MI_TAB[MI_HOME] == MTAB_DISPLAY && mtab_rows(MTAB_CONTROL) == 8u && MI_TAB[MI_SELECT] == MTAB_CONTROL && mtab_rows(MTAB_AUDIO) == 6u &&
-                 mtab_rows(MTAB_MIDI) == 8u && MI_TAB[MI_MFOLLOW] == MTAB_MIDI && MI_TAB[MI_SCRWAKE] == MTAB_MIDI && MI_SCRWAKE + 1u == MI_LCLEAR && MI_TAB[MI_LCLEAR] == MTAB_MIDI && MI_TAB[MI_TCH4] == MTAB_MIDI && mtab_rows(MTAB_SYSTEM) == 6u + FELUCCA_CPU2 &&
+                 mtab_rows(MTAB_MIDI) == 8u && MI_TAB[MI_MFOLLOW] == MTAB_MIDI && MI_TAB[MI_SCRWAKE] == MTAB_MIDI && MI_SCRWAKE + 1u == MI_LCLEAR && MI_TAB[MI_LCLEAR] == MTAB_MIDI && MI_TAB[MI_TCH4] == MTAB_MIDI && mtab_rows(MTAB_SYSTEM) == 7u + FELUCCA_CPU2 && MI_TAB[MI_CLRALL] == MTAB_SYSTEM && !menu_valued(MI_CLRALL) &&
 #if FELUCCA_CPU2
                  MI_TAB[MI_CPU2] == MTAB_SYSTEM &&
 #endif
@@ -1993,35 +1993,40 @@ static int test_information(void)
 
 /* GREY is grayscale (but its primary and secondary, drawn gray here) on every screen: every page of every engine, HOME, the menu, ABOUT, the dialogs (RGB565 gray:
  * R = B, G = 2 R). MONO (black and white, blended per channel) is neutral on every screen: R = B, G within 2 of 2 R
- * (the 5-6-5 rounding of its edges) */
+ * (the 5-6-5 rounding of its edges), its primary, secondary and the battery's green (1.8) drawn white for the check */
 static int screen_gray(void)
 {
     uint32_t i;
-    uint16_t acc = ux.accent, rec = ux.rec;
-    if (ux.mono) {                                  /* GREY's two colours (secondary, primary) are drawn gray for this check */
-        ux.accent = ux.rec = ux.text; ux.gen++;
+    uint16_t acc = ux.accent, rec = ux.rec, okc = ux.ok;
+    if (ux.mono) {                                  /* GREY's two colours (secondary, primary) and the battery's green (1.8)
+                                                     * are drawn gray for this check */
+        ux.accent = ux.rec = ux.ok = ux.text; ux.gen++;
         ui.force = 1; ui_draw();
     }
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = swap16(host_screen[i]);
         if ((c >> 11) != (c & 31u) || ((c >> 5) & 63u) != (c >> 11) * 2u) {
-            ux.accent = acc; ux.rec = rec; ux.gen++; ui.force = 1;
+            ux.accent = acc; ux.rec = rec; ux.ok = okc; ux.gen++; ui.force = 1;
             return 0;
         }
     }
-    ux.accent = acc; ux.rec = rec; ux.gen++; ui.force = 1;
+    ux.accent = acc; ux.rec = rec; ux.ok = okc; ux.gen++; ui.force = 1;
     return 1;
 }
 static int screen_neutral(void)
 {
     uint32_t i;
+    uint16_t acc = ux.accent, rec = ux.rec, okc = ux.ok;
+    ux.accent = ux.rec = ux.ok = ux.text; ux.gen++;    /* (1.8: MONO's three colours, as GREY's, drawn white for this check) */
+    ui.force = 1; ui_draw();
     for (i = 0; i < 240u * 240u; i++) {
         uint16_t c = swap16(host_screen[i]);
         int32_t d = (int32_t)((c >> 5) & 63u) - (int32_t)(c >> 11) * 2;
         if ((c >> 11) != (c & 31u) || d < -2 || d > 2)
-            return 0;
+            break;
     }
-    return 1;
+    ux.accent = acc; ux.rec = rec; ux.ok = okc; ux.gen++; ui.force = 1;
+    return i == 240u * 240u;
 }
 static int mono_screens(uint32_t pal, int (*chk)(void), uint32_t *n)
 {
@@ -2518,6 +2523,29 @@ static int test_chain(void)
     bad += check("cancel preserves the full song", chain_config.count == CHAIN_ROWS);
     turn(EN_K4, 1); press(B_OCTUP); press(B_OCTUP);
     bad += check("confirmed CLEAR SONG keeps musical steps", !chain_config.count && !ui.song_row);
+    {   /* 1.8 (#266): MENU > SYSTEM > CLEAR ALL: the dialog, then a new project (every track's steps and automation, the
+         * song order, BPM); OCT- keeps it all */
+        int ok = 1;
+        char qa[24], qb[24];
+        chain_config.count = 1;                         /* (a section of slot A) */
+        trk[1].step[0].time = ST_NOTE; trk[1].step[0].n = 1;
+        song.g[G_BPM] = (int16_t)(GP[G_BPM].def + 7);
+        ui.menu = 1; ui.menu_sel = MI_CLRALL; press(B_OCTUP);
+        confirm_text(qa, qb);
+        ok &= ui.confirm == CF_CLEAR_ALL && !ui.menu && str_eq(qa, "CLEAR ALL?") && str_eq(qb, "SAVED PROJECTS STAY");
+        press(B_OCTDN);
+        ok &= !ui.confirm && chain_config.count && step_on(&trk[1].step[0]);
+        ui.menu = 1; ui.menu_sel = MI_CLRALL; press(B_OCTUP); press(B_OCTUP);
+        ok &= !ui.confirm && !chain_config.count && song.g[G_BPM] == GP[G_BPM].def && msg_is("ALL CLEARED") &&
+              proj_cur == PROJ_NO_SLOT && !proj_name[0];
+        for (k = 0; k < NTRK; k++) {
+            uint32_t i;
+            ok &= !motion_count(&trk[k]) && trk[k].eng_req == trk_def_engine(k);
+            for (i = 0; i < NSTEP; i++)
+                ok &= !step_on(&trk[k].step[i]);
+        }
+        bad += check("#266 MENU > SYSTEM > CLEAR ALL asks, OCT- keeps, OCT+ a new project (no steps, automation, song)", ok);
+    }
     return bad;
 }
 

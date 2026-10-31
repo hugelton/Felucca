@@ -8,6 +8,8 @@
  * USB LEVEL; 1.1: CLICK, CLICK LEVEL, COUNT-IN; 1.2: TUNE), MIDI (1.2: MIDI IN; 1.5.5: T1..T4 CHANNEL, AUTO SELECT, SCREEN WAKE; 1.5: LEARN CLEAR), USB SERIAL, RESTORE
  * LAST (1.2), then CALIBRATION (the setup screen: HARDWARE CALIBRATION), INFO (1.2) and ABOUT, the rows with no value
  * (MI_VALUES: the rows before them hold one, but LEARN CLEAR: menu_valued). 1.0.5: in four tabs (MI_TAB); 1.2: five.
+ * 1.8 (#266): CLEAR ALL (SYSTEM), a row with no value: OCT+ asks (the dialog), then the music as a new project
+ * (project.c project_new); the stored projects, user presets, samples, settings and MIDI LEARN stay
  * 1.5: LEARN CLEAR (MIDI) is an action, not a setting: OCT+ clears MIDI LEARN's map (midi_learn.c ml_clear_all; the editor
  * has LEARN_SET op 2 for it, so MENU_DESC does not offer it); the row shows how many CCs are learned
  * 1.2: TUNE and MIDI IN are not settings: they edit the project's G_TUNE and G_ROUTE (up to 1.1.5 on GLO > GLOBAL and
@@ -19,14 +21,14 @@ enum { MI_COLOR, MI_STYLE, MI_LARGE, MI_ANIM, MI_LEDS, MI_SCROFF, MI_SCOPE, MI_H
 #if FELUCCA_CPU2
        MI_CPU2,                                        /* (not in a FELUCCA_CPU2=0 build: core.h) */
 #endif
-       MI_PANEL, MI_INFO, MI_ABOUT, MI_COUNT };
+       MI_CLRALL, MI_PANEL, MI_INFO, MI_ABOUT, MI_COUNT };
                                                        /* (1.1: the metronome's rows in AUDIO; 1.2: RESTORE LAST in
                                                         * SYSTEM, SCALE LEDS STEP PREVIEW CHORD ENTRY in CONTROL, SCOPE in
                                                         * DISPLAY, TUNE in AUDIO, MIDI IN in MIDI, INFO in SYSTEM;
                                                         * 1.3: HOME in DISPLAY; 1.5: HELP in SYSTEM; 1.5.5: SELECT
                                                         * in CONTROL, T1..T4 CHANNEL, AUTO SELECT and SCREEN WAKE
                                                         * in MIDI; 1.6.1: 2ND CORE in SYSTEM) */
-#define MI_VALUES MI_PANEL
+#define MI_VALUES MI_CLRALL
 #if FELUCCA_CPU2
 #define MI_TEXT(row) ((row) == MI_CPU2)                /* OFF / ON (BETA): its values as words, not a switch (ui_menu.c) */
 #else
@@ -44,7 +46,7 @@ static const char *const MI_NAME[MI_COUNT] = {"COLOR", "STYLE", "LARGE", "ANIM",
 #if FELUCCA_CPU2
                                               "2ND CORE",
 #endif
-                                              "CALIBRATION", "INFO",
+                                              "CLEAR ALL", "CALIBRATION", "INFO",
                                               "ABOUT"};
 /* 1.0.5: the MENU's tabs (ui_menu.c: ALGORITHM steps between them, PRESETS among one tab's rows; the editor gets a
  * row's tab after its MENU_DESC reply). A tab's rows follow each other in MI order (tests/ui_test.c checks it); at
@@ -76,6 +78,7 @@ static const uint8_t MI_TAB[MI_COUNT] = {
 #if FELUCCA_CPU2
     MTAB_SYSTEM,                                                            /* 2ND CORE (1.6.1) */
 #endif
+    MTAB_SYSTEM,                                                            /* CLEAR ALL (1.8, #266) */
     MTAB_SYSTEM, MTAB_SYSTEM, MTAB_SYSTEM,                                  /* CALIBRATION, INFO (1.2), ABOUT */
 };
 /* TUNE: the project's tuning in cents (G_TUNE, -50..+50); as a row its values 0..TUNE_N - 1 (value - TUNE_MIN). The

@@ -42,7 +42,8 @@ static void draw_rec_mark(int32_t x, uint16_t bg)
 /* the battery: a 16 px Fukiai icon. The stock thresholds give 0..3 bars of 3; the font has 0..4 bars of 4:
  * each level takes the nearest share, 0 -> battery_0 (empty), 1 (1/3) -> battery_1 (1/4), 2 (2/3) ->
  * battery_3 (3/4), 3 (full) -> battery_4 (battery_2 is not used); USB power: battery_charging.
- * Colours as the drawn battery had them: one bar left the accent, empty MID (its outline), else THEME */
+ * Colours as the drawn battery had them: one bar left the accent, empty MID (its outline), else THEME; USB power
+ * (1.8): green (T_OK) */
 static uint32_t batt_icon(int32_t lvl)
 {
     static const uint8_t I[5] = {ICON_X_BAT0, ICON_X_BAT1, ICON_X_BAT3, ICON_X_BAT4, ICON_X_BAT_CHG};
@@ -51,7 +52,7 @@ static uint32_t batt_icon(int32_t lvl)
 static void draw_battery(int32_t bx)
 {
     int32_t lvl = batt_shown();
-    cv_icon_mid(bx, H_HEAD / 2, 24, batt_icon(lvl), lvl == 1 ? T_WARN : lvl == 0 ? T_MID : T_THEME, T_BG);   /* 24 px: the glyph is wide and short */
+    cv_icon_mid(bx, H_HEAD / 2, 24, batt_icon(lvl), lvl == 4 ? T_OK : lvl == 1 ? T_WARN : lvl == 0 ? T_MID : T_THEME, T_BG);   /* 24 px: the glyph is wide and short */
 }
 
 /* ---------------------------------------------------- rolling digits --- */
@@ -1473,6 +1474,10 @@ static void confirm_text(char *a, char *b)
     case CF_CLEAN_SOUND:                             /* 1.5.5 (#190): the basic sound, nothing added */
         str_cpy(a, "CLEAN INIT SOUND?", 24);
         str_cpy(b, "NO FX, NO MOD", 24);
+        break;
+    case CF_CLEAR_ALL:                               /* 1.8 (#266): MENU > SYSTEM */
+        str_cpy(a, "CLEAR ALL?", 24);
+        str_cpy(b, "SAVED PROJECTS STAY", 24);
         break;
     case CF_CLEAR_MOTION:
         str_cpy(a, "CLEAR T1 AUTOMATION?", 24); a[7] = (char)('1' + k % NTRK);

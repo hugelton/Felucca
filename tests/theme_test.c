@@ -50,20 +50,23 @@ int main(int argc, char **argv)
     assert(NPALETTES == 10u && !strcmp(UI_PALETTES[0].name, "GREY") && !strcmp(UI_PALETTES[7].name, "HI-CON") &&
            !strcmp(UI_PALETTES[8].name, "NIGHT") && !strcmp(UI_PALETTES[9].name, "MONO") && UI_BW_INDEX == 9u);
     /* (#50, 1.0.2: appended, the ids stay; GREY is the MONO of 1.0.1, id 0) */
-    for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {   /* MONO: every token black or white, in FLAT and LINE */
+    for (unsigned st = ST_FLAT; st <= ST_LINE; st++) {   /* MONO: every token black or white (but its two colours), in FLAT and LINE */
         uint16_t *tok = &ux.bg;
         ux.style = (uint8_t)st;
         palette_set(UI_BW_INDEX);
         assert(&ux.grid - tok == 15);
         for (unsigned i = 0; i < 16; i++) {
             /* the one grey: DIM (inactive), LINE (tracks), RAISE (wells under white text), LANE (the piano roll) */
+            if (&tok[i] == &ux.accent || &tok[i] == &ux.rec)   /* (1.8: its two colours, GREY's blue and red) */
+                continue;
             int grey_ok = tok[i] == UI_BW_GREY && (&tok[i] == &ux.dim || &tok[i] == &ux.line || &tok[i] == &ux.raise ||
                                                    &tok[i] == &ux.lane);
             if (!(tok[i] == 0x0000u || tok[i] == 0xFFFFu || grey_ok))
                 printf("MONO (%s): token %u = %04x is not black or white\n", st ? "LINE" : "FLAT", i, tok[i]);
             assert(tok[i] == 0x0000u || tok[i] == 0xFFFFu || grey_ok);
         }
-        assert(T_BG == 0u && T_SURF == 0u && T_TEXT == 0xFFFFu && T_SEL == 0xFFFFu && T_INK == 0u && T_REC == 0xFFFFu);
+        assert(T_BG == 0u && T_SURF == 0u && T_TEXT == 0xFFFFu && T_SEL == 0xFFFFu && T_INK == 0u &&
+               T_REC == UI_PALETTES[UI_GREY_INDEX].primary && T_ACCENT == UI_PALETTES[UI_GREY_INDEX].secondary);
     }
     ux.style = ST_FLAT;
     for (unsigned p = 0; p < NPALETTES; p++) {
@@ -130,7 +133,9 @@ int main(int argc, char **argv)
                 if (p == UI_GREY_INDEX && !(x >= 136 && x < 180 && y >= 64 && y < 84) && !(x >= 168 && x < 230 && y >= 20 && y < 42) &&
                     !(x >= 214 && x < 226 && y >= 4 && y < 16))
                     assert(gray(v));          /* every blended pixel of GREY (but the REC and HOT texts and the ACCENT swatch: its two colours) */
-                if (p == UI_BW_INDEX) assert(neutral(v));         /* and of MONO */
+                if (p == UI_BW_INDEX && !(x >= 136 && x < 180 && y >= 64 && y < 84) && !(x >= 168 && x < 230 && y >= 20 && y < 42) &&
+                    !(x >= 214 && x < 246 && y >= 4 && y < 16))
+                    assert(neutral(v));       /* and of MONO (1.8: but its two colours, as GREY's) */
                 sheet[(p / 4 * 124 + y) * 960 + p % 4 * 240 + x] = v;
             }
     }

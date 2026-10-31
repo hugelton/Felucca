@@ -20,10 +20,12 @@ the rest with fixed blends at palette_set() time (src/gfx.c, the same integer ma
   RAISE = mix(SURF, TEXT, 12 %) a raised area on a surface: empty step stubs, guides, the selected drum
                                 lane, fader slots, button wells, chips
   KEY  = mix(BG, TEXT, 78 %)    a keycap's fill (a mid-light cushion; its label INK, unavailable: a DIM fill)
-Outside the palette: the QR code's fixed black and white; the crash screen's fixed red. GREY is grayscale
-(R = G = B) in color1..3 and every tint derived from them; its primary and secondary are the only colours.
-MONO is black and white: its tokens are not blended but set (src/gfx.c palette_set, bw() here): BG SURF
-TINT GRID black; TEXT THEME ACCENT REC MID SEL KEY white (a selection, a THEME or ACCENT fill, a keycap: white
+Outside the palette: the QR code's fixed black and white; the crash screen's fixed red; the battery's green on USB
+power (1.8, OK_DARK / OK_LIGHT by BG: src/gfx.c T_OK). GREY is grayscale (R = G = B) in color1..3 and every tint
+derived from them; its primary and secondary are the only colours (and the battery's green).
+MONO is black and white but for the same three colours (1.8: its primary and secondary GREY's red and blue, ACCENT
+and REC; were white): its tokens are not blended but set (src/gfx.c palette_set, bw() here): BG SURF
+TINT GRID black; TEXT THEME MID SEL KEY white (a selection, a THEME fill, a keycap: white
 with black INK, an inversion); and one mid grey, BW_GREY, for DIM LINE RAISE LANE. That grey is the one
 exception: RAISE is the fill under white text on chips, idle cells and button wells and the track of
 empty steps, slots and gauges, and DIM marks the inactive and the unavailable; black would hide them,
@@ -51,7 +53,8 @@ PALETTES = [
     # (the derived MID / DIM / LINE are tints of TEXT), phosphor-green values, white for the one active thing
     ("NIGHT",  (0, 0, 0),       (56, 220, 100),  (150, 230, 170), RED,       (255, 255, 255)),
     # 1.0.2: black and white (the derived tokens are set, not blended: bw()); the old MONO is GREY (id 0)
-    ("MONO",   (0, 0, 0),       (255, 255, 255), (255, 255, 255), (255, 255, 255), (255, 255, 255)),
+    # 1.8: its primary and secondary GREY's red and blue (were white)
+    ("MONO",   (0, 0, 0),       (255, 255, 255), (255, 255, 255), RED,       (72, 140, 255)),
 ]
 BW = "MONO"
 BW_GREY = (82, 82, 82)             # MONO's one mid grey (RGB565 10/20/10): DIM LINE RAISE LANE
@@ -63,6 +66,7 @@ OLD_TO_NEW = {"GREEN": "GREEN", "AMBER": "AMBER", "CYAN": "ICE", "RED": "ROSE", 
               "LIGHT": "PAPER", "PAPER": "PAPER", "SKY": "PAPER", "MINT": "PAPER", "LILAC": "PAPER", "ROSE": "PAPER",
               "SAND": "PAPER", "L-HICON": "HI-CON"}
 PAL_TAG = 64                       # stored id = PAL_TAG + index; below 20: an old id
+OK_DARK, OK_LIGHT = (84, 214, 120), (20, 140, 60)   # 1.8: the battery on USB power (src/gfx.c T_OK), by BG
 REC_DARK, REC_LIGHT = RED, RED_LIGHT        # (CUSTOM migrated from the five of 1.6 and before: its primary)
 QR_LIGHT, QR_DARK, CRASH_BG, CRASH_INK = (255, 255, 255), (0, 0, 0), (160, 0, 0), (255, 255, 255)
 PCT = {"MID": 70, "DIM": 42, "LINE": 18, "SEL": 80, "TINT": 12, "KEY": 78, "SURF": 12}
@@ -168,6 +172,8 @@ def main():
                     fails.append(f"{name} is not grayscale: {k} = {v:#06x}")
         if name == BW:                 # every token pure black or white, or the one grey (DIM LINE RAISE LANE)
             for k, v in d.items():
+                if k in ("accent", "rec"):           # (1.8: primary and secondary are MONO's colours, as GREY's)
+                    continue
                 if k != "light" and v not in (0x0000, 0xFFFF) and not (v == to565(BW_GREY) and k in ("dim", "line", "raise_", "lane")):
                     fails.append(f"{name} is not black and white: {k} = {v:#06x}")
         for f, b, lim, why in CHECKS:
@@ -193,6 +199,7 @@ def main():
                 f"#define UI_BW_GREY 0x{to565(BW_GREY):04x}u          /* MONO's one grey: DIM LINE RAISE LANE */",
                 f"#define UI_PAL_TAG {PAL_TAG}u          /* stored id = UI_PAL_TAG + index; below 20: an old id */"]
         out += [f"#define UI_{k}_PCT {v}" for k, v in PCT.items()] + [f"#define UI_RAISE_PCT {RAISE_PCT}   /* SURF -> TEXT */"]
+        out += [f"#define UI_OK_DARK 0x{to565(OK_DARK):04x}u", f"#define UI_OK_LIGHT 0x{to565(OK_LIGHT):04x}u"]
         out += [f"#define UI_REC_DARK 0x{to565(REC_DARK):04x}u", f"#define UI_REC_LIGHT 0x{to565(REC_LIGHT):04x}u",
                 f"#define UI_QR_LIGHT 0x{to565(QR_LIGHT):04x}u", f"#define UI_QR_DARK 0x{to565(QR_DARK):04x}u",
                 f"#define UI_CRASH_BG 0x{to565(CRASH_BG):04x}u", f"#define UI_CRASH_INK 0x{to565(CRASH_INK):04x}u", "",

@@ -1129,6 +1129,35 @@ static int project_restore_runtime(const project_t *input)
     memset(snd_said, 0, sizeof snd_said);               /* a missing sample is said again, after LOADED */
     return 0;
 }
+/* MENU > SYSTEM > CLEAR ALL (1.8, #266): the music as a new project, loaded as one is: every track its power-on
+ * engine and sound with no steps or automation, the song order, BPM and the rest of the project's values their
+ * defaults, the FM6 init patch, no name and no slot. The stored projects, user presets, samples, settings and MIDI
+ * LEARN stay (an autosave follows as after any change). 0 done, 1 refused (as project_restore_runtime) */
+static int project_new(void)
+{
+    project_t *q = &proj_scratch;
+    uint32_t i, k;
+    memset(q, 0, sizeof *q);
+    q->magic = PROJ_MAGIC;
+    q->size = sizeof *q;
+    q->parts = NPART;
+    for (i = 0; i < G_COUNT; i++)
+        q->g[i] = GP[i].def;
+    chain_defaults(&q->chain);
+    for (i = 0; i < NTRK; i++) {
+        for (k = 0; k < P_COUNT; k++)
+            q->t[i].p[k] = param_desc_of(trk_def_engine(i), k)->def;
+        q->t[i].engine = (uint8_t)trk_def_engine(i);
+        q->t[i].preset = PROJ_DEF_SOUND;                /* (project_restore_runtime: the power-on sound, no steps) */
+        for (k = 0; k < NSTEP; k++)
+            q->t[i].step[k].time = ST_REST;
+    }
+    proj_fm6_init(q);                                   /* (and the sum) */
+    if (project_restore_runtime(q))
+        return 1;
+    ui_message("ALL CLEARED");
+    return 0;
+}
 static void project_load(uint32_t slot)
 {
 #if FELUCCA_FLASH
