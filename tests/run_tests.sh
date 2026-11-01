@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
 # Host tests of the Felucca sources (no hardware). Run from the repo root after ./build.sh:
-#   tests/run_tests.sh
+#   tests/run_tests.sh [--ai-output]
 #
 # Regression suite (tests/regress.c, tests/target_budget.py; details at the top of regress.c):
 #   golden renders  every engine x preset, the GM map on DRUM, voice modes, FX sends, a 4-track mix: one hash
@@ -202,11 +202,32 @@ export AC79_SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"
 cd "$(dirname "$0")/.."
 OUT=build/host
 mkdir -p "$OUT"
+case "${1:-}" in
+    --ai-output)
+        if [ "$#" != 1 ]; then echo "usage: tests/run_tests.sh [--ai-output]" >&2; exit 2; fi
+        exec python3 tests/test_output.py tests/run_tests.sh
+        ;;
+esac
 # the hardware layer: firmware/hal, then felucca-bsp (firmware/bsp: chip/, boards/fm1/), as tools/build.py
 HALI="-Ifirmware/hal -Ifirmware/bsp/chip -Ifirmware/bsp/boards/fm1 -Ifirmware/src"   # (src: uac_fir.h, which bsp/chip/usb.c includes)
 CC="${CC:-cc} -O1 -Wall -Wno-unused-function $HALI"
 fail=0
-run() { echo "== $1"; shift; "$@" || fail=1; }
+run() {
+    echo "== $1"
+    if [ -n "${FELUCCA_TEST_OUTPUT_TOKEN:-}" ]; then
+        printf '%s start %s\n' "$FELUCCA_TEST_OUTPUT_TOKEN" "$1"
+        shift
+        result=0
+        "$@" || result=$?
+        printf '%s end %s\n' "$FELUCCA_TEST_OUTPUT_TOKEN" "$result"
+        [ "$result" -eq 0 ] || fail=1
+    else
+        shift
+        "$@" || fail=1
+    fi
+}
+
+run "compact output reporting contracts" python3 tests/test_output_test.py
 
 $CC -o "$OUT/storage_test" tests/storage_test.c
 $CC -Ibuild/gen -Ifirmware/src -o "$OUT/signed_audio_scaling_test" tests/signed_audio_scaling_test.c -lm

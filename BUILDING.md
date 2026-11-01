@@ -113,6 +113,31 @@ MIDI out, the editor, updates), TRS MIDI and the user sample slots. A build of i
 tests/run_tests.sh
 ```
 
+For a shorter developer or CI console report, use:
+
+```sh
+tests/run_tests.sh --ai-output
+```
+
+This runs the same sequential suite with the same exit status. Each `run` helper
+invocation prints a pass/fail status; compiler/setup failures outside that helper
+still fail the run, even if no test started. Full merged stdout/stderr is saved in
+`build/host/test-run-*/output.log`, with the final status, exit code and counts in
+`summary.json` beside it. Both paths are printed at the end. SIGINT/SIGTERM are
+forwarded to the running process group and reported as cancellation with a nonzero
+exit status. Remaining processes receive TERM after two seconds and KILL after
+four seconds if necessary. An interrupted test may be listed as incomplete.
+
+The console shows at most ten warning/skip line hints, each capped at 200
+characters, plus total matching line counts. These text hints are not a complete
+warning inventory or counts of test cases: a passing test can skip checks, and
+unfamiliar diagnostics require reading the full log. Inspect that log for failures,
+cancellations and omitted diagnostics before accepting a result. Compact output
+changes presentation only; it does not add test coverage or hardware qualification.
+Omit the flag for the existing complete console transcript. Presentation helper
+contracts can be checked without a firmware build with
+`python3 tests/test_output_test.py`; they also run as part of the suite.
+
 Runs the host tests and, with Node.js, the web page tests (and, with Emscripten too, the browser emulator's). Run it after `./build.sh`
 (it uses `build/` and needs `AC79_SDK` set as for the build). The suites cover flash storage,
 user presets, projects of every format, backup, the keys and knobs, MIDI (USB, TRS, clock,
