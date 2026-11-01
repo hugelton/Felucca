@@ -804,14 +804,32 @@ static uint32_t foot_rename(void)
     return 0;
 }
 
-/* the sound's name on the track: a user preset or the engine's preset (b holds 16) */
+/* the sound's name on the track: a user preset or the engine's preset (b holds 16). FM6 (#309): on a bank slot
+ * (B1..B32) the name of the bank voice it plays; on OWN the patch's own name when it is not the name of the factory
+ * patch of the track's preset (an edited factory patch keeps the preset's name) */
 static void sound_name(const track_t *t, char *b)
 {
     const engine_t *e = ENGINES[t->eng_req % NENGINES];
     b[0] = 0;
-    if (user_of(t) < UP_SLOTS)
+    if (user_of(t) < UP_SLOTS) {
         up_name(user_of(t), b);
-    else if (e->npresets)
+        return;
+    }
+    if (t->eng_req == ENGI_FM6) {
+        uint32_t tr = (uint32_t)(t - trk) % NTRK, k;
+        int32_t s = fm6_slot[tr];
+        const uint8_t *nm = fm6_patch[tr] + FP_NAME;
+        if (fm6_bank_slot(s) >= 0 ||
+            (s == (int32_t)FM6_OWN && memcmp(nm, FM6_FACTORY[t->preset % FM6_NFACTORY] + 118, 10))) {
+            for (k = 0; k < 10u; k++)                    /* upper case, as a user preset's (up_name) */
+                b[k] = (char)(nm[k] >= 'a' && nm[k] <= 'z' ? nm[k] - 32u : nm[k]);
+            for (b[10] = 0; k && b[k - 1] == ' '; k--)
+                b[k - 1] = 0;
+            if (b[0])
+                return;
+        }
+    }
+    if (e->npresets)
         str_cpy(b, e->presets[t->preset % e->npresets].name, 16);
 }
 

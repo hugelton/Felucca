@@ -9145,6 +9145,47 @@ static void fop_pick(uint32_t opn)                   /* KNOB 1: OP opn (1..6) */
     turn(EN_K1, -6);
     turn(EN_K1, (int32_t)opn - 1);
 }
+/* #309: the footer's sound name on FM6: the preset's on a factory slot and on its edited patch (OWN), the bank voice's
+ * on B1..B32 (in upper case), and the bank voice's again on OWN once it is the track's own patch (a load) */
+static int ft_bank_read(uint32_t k, uint8_t *pk)
+{
+    memcpy(pk, FM6_FACTORY[(k + 2u) % FM6_NFACTORY], FM6_PACKED);
+    memcpy(pk + 118, "Bank Voice", 10);
+    return 0;
+}
+static int test_fm6_foot_name(void)
+{
+    char b[16];
+    int bad = 0, ok;
+    uint32_t tr;
+    ui_power_on();
+    song.sel = 1;                                    /* T2: FM6 PAD (SLOT F5) */
+    tr = song.sel;
+    sound_name(TSEL, b);
+    ok = TSEL->eng_req == ENGI_FM6 && fm6_slot[tr] == 4u && str_eq(b, "PAD");
+    fm6_patch[tr][3u * FP_OP + FP_OL] ^= 1u;         /* the factory patch edited: SLOT OWN, the name stays */
+    fm6_adopt(tr);
+    sound_name(TSEL, b);
+    ok &= fm6_slot[tr] == FM6_OWN && str_eq(b, "PAD");
+    bad += check("#309 FM6 footer: the preset's name on F5 and on its edited patch (OWN)", ok);
+    fm6_bank_used = 1u;
+    fm6_bank_read = ft_bank_read;
+    TSEL->p[P_E7] = (int16_t)(FM6_OWN + 1u);
+    fm6_poll();
+    sound_name(TSEL, b);
+    ok = fm6_slot[tr] == FM6_OWN + 1u && str_eq(b, "BANK VOICE");
+    fm6_adopt(tr);                                   /* as a project load or a power-on puts the patch in */
+    sound_name(TSEL, b);
+    ok &= fm6_slot[tr] == FM6_OWN && TSEL->p[P_E7] == (int16_t)FM6_OWN && str_eq(b, "BANK VOICE");
+    bad += check("#309 FM6 footer: the bank voice's name on B1, and on OWN after a load", ok);
+    TSEL->p[P_E7] = 4;
+    fm6_poll();
+    sound_name(TSEL, b);
+    bad += check("#309 FM6 footer: back on F5, the preset's name", fm6_slot[tr] == 4u && str_eq(b, "PAD"));
+    fm6_bank_used = 0;
+    fm6_bank_read = 0;
+    return bad;
+}
 static int slot_own(void) { return TSEL->p[P_E7] == FM6_OWN && fm6_slot[song.sel] == FM6_OWN; }
 static int test_fm6_ops(void)
 {
@@ -10075,6 +10116,7 @@ int main(void)
     bad += test_momentary();
     bad += test_fm6_charts();
     bad += test_fm6_ops();
+    bad += test_fm6_foot_name();
     bad += test_home_tracks();
     bad += test_fx_map_columns();
     bad += test_help();
