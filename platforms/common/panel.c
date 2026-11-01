@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* A panel drawn beside the screen, for the platforms that have no controls of their own (platforms/linux, and
- * platforms/libretro after it): 8 knobs, 14 buttons, 27 keys, their LEDs, and the ways to play them, a pointer
- * (mouse, touch) and a cursor (arrows, a gamepad). It runs on web/emu/felucca_web.c's calls (web_buttons, web_keys,
- * web_enc, web_master, web_lit_* ...), included after it. It is drawn as the screen is, in its pixels, by the
+/* A panel drawn beside the screen, for the platforms that have no controls of their own (platforms/sdl, and
+ * platforms/libretro): 8 knobs, 14 buttons, 27 keys, their LEDs, and the ways to play them, a pointer
+ * (mouse, touch) and a cursor (arrows, a gamepad). It runs on platforms/host/felucca_host.c's calls (fh_buttons, fh_keys,
+ * fh_enc, fh_master, fh_lit_* ...), included after it. It is drawn as the screen is, in its pixels, by the
  * firmware's own canvas (src/gfx.c: cv_rrect, cv_text with the UI's fonts, the palette's colours): the screen and
  * the panel one picture (panel_render), scaled to the platform's screen (panel_scale: sharp, then smooth), so a
  * window and a framebuffer alike show it. Nothing of the firmware changes for it. (An interim panel: the UI for
  * larger screens is its own step, memos' plan.)
  *   - two layouts on a canvas in the screen's pixels: WIDE (the screen left, the panel right, 520 x 240) and TALL
- *     (the screen above the panel, 272 x 500); NONE: the screen alone (240 x 240);
+ *     (the screen above the panel, 272 x 500); NONE: the screen alone (240 x 240); DUAL: the panel alone, 320 x 240,
+ *     for a second screen (a touch screen beside the one that shows the screen);
  *   - the pointer: a key or a button held while pressed (a key: drag across to the next), a knob turned by a drag up
  *     or down or by the wheel, MASTER set by the drag; the second button (right click) latches a key or a button
  *     (held until it is clicked again: two hands with one mouse);
@@ -18,7 +19,10 @@
  *   - the stick: an arrow moved over the canvas (an analog stick, for a gamepad without a touch screen) that clicks
  *     as the pointer does (panel_stick_*). */
 
-enum { PNL_NONE, PNL_WIDE, PNL_TALL };
+#include <math.h>
+#include <string.h>
+
+enum { PNL_NONE, PNL_WIDE, PNL_TALL, PNL_DUAL };
 enum { PC_KEY, PC_BTN, PC_KNOB };
 #define PC_MASTER NE                     /* (the knob ids: EN_SELECT .. EN_K4, then MASTER) */
 #define PNL_NCTL (27 + NB + NE + 1)
@@ -38,6 +42,7 @@ typedef struct {
     int stick;                           /* the arrow shown (the stick moved last) */
     float sx, sy;                        /* the arrow, in canvas pixels */
     int16_t turns[NE + 1];               /* the knobs' marks (the encoders have no end: a picture only) */
+    int grid, keys_x, keys_y, keys_h;    /* the keys as the DRUM grid's pads (panel_mode), and where the keys are */
 } panel_ui_t;
 
 static const char *const PNL_KNOB_NAME[NE + 1] = {"SEL", "ALGO", "PRST", "K1", "K2", "K3", "K4", "MSTR"};
@@ -55,6 +60,40 @@ static void pnl_add(panel_ui_t *p, int x, int y, int w, int h, int kind, int id)
     c->kind = (uint8_t)kind, c->id = (uint8_t)id;
 }
 
+/* the keys in their place (they are the last 27 controls, white then black): a keyboard; or, on the DRUM grid
+ * (p->grid), its pads as the FM-1's keys are there (ui.c grid_on): the 16 white keys the steps of the page, 8 to a row,
+ * under a row of the 11 black keys, the lanes 1..8, ACC and the page down / up. The same keys either way: only the
+ * picture and where a touch finds them change */
+static void pnl_keys_place(panel_ui_t *p)
+{
+    int i, x0 = p->keys_x, y0 = p->keys_y, h = p->keys_h, w0 = p->n - 27, top = 22, ph = (h - top - 6) / 2;
+    for (i = 0; i < 16; i++) {
+        pnl_ctl_t *c = &p->c[w0 + i];
+        if (p->grid)
+            c->x = (int16_t)(x0 + (i % 8) * 32 + 1), c->y = (int16_t)(y0 + top + 4 + (i / 8) * (ph + 2)), c->w = 30,
+            c->h = (int16_t)ph;
+        else
+            c->x = (int16_t)(x0 + i * 16), c->y = (int16_t)y0, c->w = 15, c->h = (int16_t)h;
+    }
+    for (i = 0; i < 11; i++) {
+        pnl_ctl_t *c = &p->c[w0 + 16 + i];
+        if (p->grid)
+            c->x = (int16_t)(x0 + i * 23 + 1 + (i >= 8) * 2), c->y = (int16_t)y0, c->w = 21, c->h = (int16_t)top;
+        else
+            c->x = (int16_t)(x0 + (PNL_BLACK_AFTER[i] + 1) * 16 - 5), c->y = (int16_t)y0, c->w = 10, c->h = (int16_t)(h * 3 / 5);
+    }
+}
+
+/* the keys follow the screen: pads while the DRUM grid is shown (not DETAIL: its keys are a keyboard's) */
+static void panel_mode(panel_ui_t *p)
+{
+    int g = p->layout != PNL_NONE && grid_on() && !detail_on();
+    if (g != p->grid) {
+        p->grid = g;
+        pnl_keys_place(p);
+    }
+}
+
 /* the controls at (x0, y0), 268 x 236: the knobs (each with its label under it), two rows of buttons, OCT, the keys
  * (black after white: a hit finds the black first, pnl_hit looks from the end) */
 static void pnl_controls(panel_ui_t *p, int x0, int y0, int key_h)
@@ -69,9 +108,11 @@ static void pnl_controls(panel_ui_t *p, int x0, int y0, int key_h)
     pnl_add(p, x0, y0 + 94, 42, 20, PC_BTN, B_OCTDN);
     pnl_add(p, x0 + 45, y0 + 94, 42, 20, PC_BTN, B_OCTUP);
     for (i = 0; i < 16; i++)
-        pnl_add(p, x0 + 6 + i * 16, y0 + 122, 15, key_h, PC_KEY, PNL_WHITE[i]);
+        pnl_add(p, 0, 0, 0, 0, PC_KEY, PNL_WHITE[i]);
     for (i = 0; i < 11; i++)
-        pnl_add(p, x0 + 6 + (PNL_BLACK_AFTER[i] + 1) * 16 - 5, y0 + 122, 10, key_h * 3 / 5, PC_KEY, PNL_BLACK[i]);
+        pnl_add(p, 0, 0, 0, 0, PC_KEY, PNL_BLACK[i]);
+    p->keys_x = x0 + 6, p->keys_y = y0 + 122, p->keys_h = key_h;
+    pnl_keys_place(p);
 }
 
 static void panel_layout(panel_ui_t *p, int layout)
@@ -81,6 +122,7 @@ static void panel_layout(panel_ui_t *p, int layout)
     p->n = 0;
     p->layout = layout;
     p->ptr = -1;
+    p->grid = 0;
     if (layout == PNL_WIDE) {
         p->cw = 520, p->ch = 240;
         p->lcd_x = 0, p->lcd_y = 0;
@@ -89,6 +131,10 @@ static void panel_layout(panel_ui_t *p, int layout)
         p->cw = 272, p->ch = 500;
         p->lcd_x = 16, p->lcd_y = 4;
         pnl_controls(p, 2, 252, 122);
+    } else if (layout == PNL_DUAL) {
+        p->cw = 320, p->ch = 240;
+        p->lcd_x = p->lcd_y = -1000;              /* (no screen here) */
+        pnl_controls(p, 26, 2, 114);
     } else {
         p->cw = p->ch = 240;
         p->lcd_x = p->lcd_y = 0;
@@ -126,10 +172,10 @@ static uint32_t panel_buttons(const panel_ui_t *p) { return p->ptr_btns | p->lat
 static void pnl_turn(panel_ui_t *p, int id, int n)
 {
     if (id == PC_MASTER) {
-        int32_t v = (int32_t)web_master_adc + 16 * n;
-        web_master((uint32_t)(v < 0 ? 0 : v));
+        int32_t v = (int32_t)fh_master_level() + 16 * n;
+        fh_master((uint32_t)(v < 0 ? 0 : v));
     } else {
-        web_enc((uint32_t)id, n);
+        fh_enc((uint32_t)id, n);
     }
     p->turns[id] = (int16_t)(p->turns[id] + n);
 }
@@ -331,15 +377,16 @@ static void pnl_ring(const pnl_ctl_t *c, uint16_t col)          /* a 1 px frame 
 /* the screen and the panel, cw x ch, into argb (0xAARRGGBB) */
 static void panel_render(panel_ui_t *p, uint32_t *argb)
 {
-    uint32_t lb = web_lit_buttons(), db = web_dim_buttons() | web_breath_buttons();
-    uint32_t lk = web_lit_keys(), dk = web_dim_keys() | web_breath_keys(), mk = web_mid_keys();
-    uint32_t keys = panel_keys(p) | web_key_mask, btns = panel_buttons(p) | web_btn_labels, i, n = (uint32_t)(p->cw * p->ch);
+    uint32_t lb = fh_lit_buttons(), db = fh_dim_buttons() | fh_breath_buttons();
+    uint32_t lk = fh_lit_keys(), dk = fh_dim_keys() | fh_breath_keys(), mk = fh_mid_keys();
+    uint32_t keys = panel_keys(p) | fh_held_keys(), btns = panel_buttons(p) | fh_held_buttons(), i, n = (uint32_t)(p->cw * p->ch);
     uint32_t keep_w = cv_w, keep_h = cv_h;
     uint16_t keep_bg = cv_bg;
     uint8_t keep_scroll = cv_scroll, keep_flip = cv_flip;
     int32_t keep_oy = cv_oy;
     int16_t keep_cy0 = cv_cy0, keep_cy1 = cv_cy1;
     int k, kx0 = 9999, ky0 = 9999, kx1 = 0, ky1 = 0;
+    panel_mode(p);
     pnl_now = p;
     if (p->layout != PNL_NONE) {
         memcpy(pnl_cv_keep, cv_px, sizeof pnl_cv_keep);
@@ -350,7 +397,7 @@ static void panel_render(panel_ui_t *p, uint32_t *argb)
             const pnl_ctl_t *c = &p->c[k];
             if (c->kind == PC_KNOB) {
                 int r = 12, cx = c->w / 2, cy = r + 1;
-                double a = c->id == PC_MASTER ? (web_master_adc / 1023.0 * 1.5 - 0.75) * 3.14159265
+                double a = c->id == PC_MASTER ? (fh_master_level() / 1023.0 * 1.5 - 0.75) * 3.14159265
                                               : p->turns[c->id] * (3.14159265 / 12.0);
                 cv_begin((uint32_t)c->w, (uint32_t)c->h, T_BG);
                 pnl_disc(cx, cy, r, T_SURF, T_BG);
@@ -383,10 +430,32 @@ static void panel_render(panel_ui_t *p, uint32_t *argb)
             const pnl_ctl_t *c = &p->c[k];
             int black = c->w < 15, x = c->x - kx0, y = c->y - ky0;
             uint32_t b = 1u << c->id;
-            uint16_t face = keys & b ? T_SEL : black ? T_SURF : ux_mix(T_RAISE, T_TEXT, 10);
+            uint16_t base = black ? T_SURF : ux_mix(T_RAISE, T_TEXT, 10);
+            /* (the FM-1's keys glow through: the face takes the LED's colour, lit / the DRUM grid's mid / dim) */
+            uint16_t face = keys & b ? T_SEL : lk & b ? ux_mix(base, T_THEME, 75) : mk & b ? ux_mix(base, T_THEME, 45)
+                          : dk & b ? ux_mix(base, T_THEME, 25) : base;
             uint16_t slit = lk & b ? T_THEME : mk & b ? ux_mix(T_LINE, T_THEME, 60) : dk & b ? ux_mix(T_LINE, T_THEME, 35) : T_LINE;
             if (c->kind != PC_KEY)
                 continue;
+            if (p->grid) {                                      /* the grid's pads: a step, a lane, ACC, a page */
+                static const char *const PNL_GRID_KEY[3] = {"ACC", "<", ">"};
+                uint32_t pl = key_place(c->id);
+                char num[4];
+                if (!key_black(c->id))
+                    fmt_int(num, (int32_t)(pl + 1u));
+                face = keys & b ? T_SEL : lk & b ? T_THEME : mk & b ? ux_mix(T_SURF, T_THEME, 45)
+                     : dk & b ? ux_mix(T_SURF, T_THEME, 25) : T_SURF;
+                cv_rrect(x, y, c->w, c->h, 4, face, T_BG);
+                cv_bg = face;
+                cv_text(x + c->w / 2 - text_w(&AF_S, key_black(c->id) ? (pl < NLANE ? drum_lane_abbr(TSEL, pl) : PNL_GRID_KEY[pl - NLANE]) : num) / 2,
+                        y + (c->h - 15) / 2 + 1, &AF_S,
+                        key_black(c->id) ? (pl < NLANE ? drum_lane_abbr(TSEL, pl) : PNL_GRID_KEY[pl - NLANE]) : num,
+                        face == T_SURF ? (pl % 4u == 0u && !key_black(c->id) ? T_TEXT : T_MID) : T_INK);
+                cv_bg = T_BG;
+                if ((p->latch_keys >> c->id) & 1u)
+                    pnl_disc(x + 4, y + 4, 2, T_ACCENT, face);
+                continue;
+            }
             if (black)                                          /* (a gap round it, over the white keys) */
                 cv_rect(x - 1, y, c->w + 2, c->h + 1, T_BG);
             cv_rrect(x, y, c->w, c->h, 3, face, T_BG);
@@ -401,8 +470,8 @@ static void panel_render(panel_ui_t *p, uint32_t *argb)
         if (p->cursor)
             pnl_ring(&p->c[p->focus], T_ACCENT);
     }
-    for (k = 0; k < 240 * 240; k++)                             /* the screen */
-        pnl_frame_px[(p->lcd_y + k / 240) * p->cw + p->lcd_x + k % 240] = web_fb[k];
+    for (k = 0; p->layout != PNL_DUAL && k < 240 * 240; k++)    /* the screen */
+        pnl_frame_px[(p->lcd_y + k / 240) * p->cw + p->lcd_x + k % 240] = fh_screen()[k];
     if (p->stick) {                                             /* the arrow: a wedge from its tip, outlined */
         int x = (int)p->sx, y = (int)p->sy, r, j;
         for (r = -1; r < 16; r++)

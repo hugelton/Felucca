@@ -157,9 +157,9 @@
 # web (web/test_web.mjs): the editor protocol against its mock device, whose tables must equal the
 #                   firmware's (tests/descdump.c -> build/host/desc.json; the MENU settings: tests/editor_test.c -> build/host/menu.json),
 #                   the package builder, the updater.
-# Browser emulator (web/emu, when emcc is there): the firmware in WebAssembly (build/emu) boots, plays keys and MIDI,
+# Browser emulator (platforms/web, when emcc is there): the firmware in WebAssembly (build/web) boots, plays keys and MIDI,
 #                   draws, lights its LEDs, keeps a save across instances, plays a song bit for bit as the same file
-#                   built with cc (web/emu/native_check.c); the cost of 1 s of a heavy song against real time.
+#                   built with cc (platforms/web/native_check.c); the cost of 1 s of a heavy song against real time.
 # PHYS (tests/phys_test.c): stability over the whole parameter and pitch range, the worst-case cost against
 #                   the heaviest factory preset, demos in build/phys_demo/; tests/phys_ref.cpp compares the
 #                   fixed-point models with DaisySP's float originals when DaisySP is there (DAISYSP=path).
@@ -263,15 +263,22 @@ EOF
         "$OUT/usb_desc_test"
 done
 
-[ -f build/felucca.fwsc ] || { echo "run ./build.sh first"; exit 1; }
+# the FM-1's package (./build.sh): the update path's tests; without it (./build.sh gen only, as CI's host job) they are
+# skipped and the rest runs
+FW=0
+[ -f build/felucca.fwsc ] && FW=1
+[ $FW = 1 ] || [ -f build/gen/felucca_tables.h ] || { echo "run ./build.sh (or ./build.sh gen) first"; exit 1; }
+if [ $FW = 1 ]; then
+    $CC -DOWN_PKG=1 -o "$OUT/ota_test" tests/ota_test.c
+    run "M-UPGRADE entry (own loader)" "$OUT/ota_test" build/felucca.fwsc
 
-$CC -DOWN_PKG=1 -o "$OUT/ota_test" tests/ota_test.c
-run "M-UPGRADE entry (own loader)" "$OUT/ota_test" build/felucca.fwsc
-
-head -c 200000 build/felucca.bin > "$OUT/old_app.bin"
-python3 tools/fm1pkg_make.py "$OUT/old_app.bin" build/loader/ota.bin "$OUT/old.fwsc" >/dev/null
-$CC -o "$OUT/ldr_test" tests/ldr_test.c
-run "update loader: other app -> this build" "$OUT/ldr_test" "$OUT/old.fwsc" build/felucca.fwsc
+    head -c 200000 build/felucca.bin > "$OUT/old_app.bin"
+    python3 tools/fm1pkg_make.py "$OUT/old_app.bin" build/loader/ota.bin "$OUT/old.fwsc" >/dev/null
+    $CC -o "$OUT/ldr_test" tests/ldr_test.c
+    run "update loader: other app -> this build" "$OUT/ldr_test" "$OUT/old.fwsc" build/felucca.fwsc
+else
+    echo "== skip the update path (no build/felucca.fwsc: ./build.sh makes it)"
+fi
 
 if [ -f build/gen/felucca_tables.h ]; then
     $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/hostsim" tests/hostsim.c -lm
@@ -521,10 +528,12 @@ else
 
     $STRICT_CC -o "$A/uart_dma_test_strict" tests/uart_dma_test.c -lm
     run "Strict ASan/UBSan (no exclusions): uart_dma_test" "$A/uart_dma_test_strict"
-    $SCC -o "$A/ldr_test" tests/ldr_test.c
-    run "ASan/UBSan: update loader (other app -> this build)" "$A/ldr_test" "$OUT/old.fwsc" build/felucca.fwsc
-    $SCC -DOWN_PKG=1 -o "$A/ota_test" tests/ota_test.c
-    run "ASan/UBSan: M-UPGRADE entry (own loader)" "$A/ota_test" build/felucca.fwsc
+    if [ $FW = 1 ]; then
+        $SCC -o "$A/ldr_test" tests/ldr_test.c
+        run "ASan/UBSan: update loader (other app -> this build)" "$A/ldr_test" "$OUT/old.fwsc" build/felucca.fwsc
+        $SCC -DOWN_PKG=1 -o "$A/ota_test" tests/ota_test.c
+        run "ASan/UBSan: M-UPGRADE entry (own loader)" "$A/ota_test" build/felucca.fwsc
+    fi
     for t in editor_test project_test backup_test robust_test fun10_test fm6bank_test midi_drift_test; do
         $SCC -o "$A/$t" tests/$t.c -lm
         run "ASan/UBSan: $t" "$A/$t"
@@ -539,8 +548,10 @@ else
     run "ASan/UBSan fuzz: user sample slot headers -> scan -> SAMPLE / GRAIN / SLICE (1000, seed 17)" "$A/fuzz_smp" 1000 17
 fi
 
-run "regression: target cost of the render loops (pi32v2 disassembly)" python3 tests/target_budget.py \
-    build/felucca.dis tests/target_budget.txt
+if [ $FW = 1 ]; then
+    run "regression: target cost of the render loops (pi32v2 disassembly)" python3 tests/target_budget.py \
+        build/felucca.dis tests/target_budget.txt
+fi
 
 run "installer CLI (fm1_install.py) against a simulated FM-1" python3 tests/install_test.py
 
@@ -552,15 +563,58 @@ else
 fi
 
 if ! command -v emcc >/dev/null 2>&1; then
-    echo "== skip the browser emulator (no emcc: Emscripten builds web/emu)"
+    echo "== skip the browser emulator (no emcc: Emscripten builds platforms/web)"
 elif ! command -v node >/dev/null 2>&1 || [ ! -f build/gen/felucca_tables.h ]; then
     echo "== skip the browser emulator (needs node and build/gen)"
 else
-    run "browser emulator: the firmware to WebAssembly (web/emu/build.sh -> build/emu)" sh web/emu/build.sh
-    cc -O2 -ffp-contract=off -w $HALI -Ibuild/gen -Ifirmware/src -o "$OUT/emu_native" web/emu/native_check.c -lm
+    run "browser emulator: the firmware to WebAssembly (platforms/web/build.sh -> build/web)" sh platforms/web/build.sh
+    cc -O2 -ffp-contract=off -w $HALI -Ibuild/gen -Ifirmware/src -o "$OUT/emu_native" platforms/web/native_check.c -lm
     run "browser emulator: the same song from the native build" "$OUT/emu_native" "$OUT/emu_native.f32"
     run "browser emulator: boot, keys, MIDI, screen, LEDs, PLAY, a save kept across instances, = native, cost" \
-        node web/emu/emu_test.mjs build/emu/felucca.wasm "$OUT/emu_native.f32"
+        node platforms/web/emu_test.mjs build/web/felucca.wasm "$OUT/emu_native.f32"
+fi
+
+if [ ! -f build/gen/felucca_tables.h ]; then
+    echo "== skip the libretro core (needs build/gen)"
+else
+    run "libretro core: the firmware as a core (platforms/libretro/build.sh -> build/libretro)" sh platforms/libretro/build.sh
+    LR_CORE=$(ls "$PWD"/build/libretro/felucca_libretro.* | grep -v '\.info$' | head -n 1)
+    cc -O1 -w -Iplatforms/libretro -o "$OUT/lr_check" platforms/libretro/lr_check.c -ldl -lm
+    LR_OUT="$PWD/$OUT"
+    mkdir -p "$LR_OUT/lr/Felucca/plugins"
+    # the engine plugins (firmware/engines/plugins: the six MIT engines) in the core's system folder: it plays them
+    for f in firmware/engines/plugins/*.c; do
+        sh firmware/engines/tools/build_plugin.sh "$f" "$LR_OUT/lr/Felucca/plugins" > /dev/null
+    done
+    run "libretro core: 44.1 kHz at 60 fps, the picture, a key, PLAY, SAVE kept in the save directory, the layout" \
+        sh -c "cd '$LR_OUT/lr' && '$LR_OUT/lr_check' '$LR_CORE' && '$LR_OUT/lr_check' '$LR_CORE' --again"
+fi
+
+# plugin engines (firmware/src/plugin.c, platforms/common/plugins.c): each engine a plugin can replace, every preset,
+# with the six MIT engines built in and then as plugins: the same audio, hash for hash
+if [ ! -f build/gen/felucca_tables.h ] || ! command -v sdl2-config >/dev/null 2>&1; then
+    echo "== skip the plugin engines check (needs build/gen and SDL2)"
+else
+    run "desktop build: platforms/sdl/build.sh -> build/sdl" sh platforms/sdl/build.sh
+    mkdir -p "$OUT/plg_none" "$OUT/plg_all"
+    for f in firmware/engines/plugins/*.c; do
+        sh firmware/engines/tools/build_plugin.sh "$f" "$OUT/plg_all" > /dev/null
+    done
+    run "plugin engines: the six MIT engines as plugins sound as built in (every preset, hash for hash)" \
+        sh -c "build/sdl/felucca --engines-check --plugins '$OUT/plg_none' > '$OUT/plg_none.txt' &&
+               build/sdl/felucca --engines-check --plugins '$OUT/plg_all' > '$OUT/plg_all.txt' 2> '$OUT/plg_all.log' &&
+               [ \$(grep -c ' as engine ' '$OUT/plg_all.log') = 6 ] && diff '$OUT/plg_none.txt' '$OUT/plg_all.txt'"
+    # a plugin of its own (FE_NEW): Felucca-Engines' example, FOLD, given the first number of the range, kept for it;
+    # listed after Felucca's engines and playing; a number no plugin plays: a sine and NO PLUGIN; a project keeps its id
+    rm -rf "$OUT/plg_new"
+    mkdir -p "$OUT/plg_new/lib" "$OUT/plg_new/run"
+    sh firmware/engines/tools/build_plugin.sh firmware/engines/examples/fold/fold.c "$OUT/plg_new/lib" > /dev/null
+    PLG_BIN="$PWD/build/sdl/felucca"
+    run "plugin engines: one of its own gets engine 32, kept, listed after Felucca's, plays; a missing one plays a sine" \
+        sh -c "cd '$OUT/plg_new/run' && '$PLG_BIN' --plugins-check --plugins ../lib && '$PLG_BIN' --plugins-check --plugins ../lib &&
+               [ \"\$(cat felucca_plugins.txt)\" = '78464c44 32' ]"
+    run "plugin engines: a project keeps its plugin's id, plays it under another device's number, NO PLUGIN without it" \
+        sh -c "cd '$OUT/plg_new/run' && '$PLG_BIN' --project-check --plugins ../lib"
 fi
 
 [ $fail -eq 0 ] && echo "ALL HOST TESTS PASSED" || { echo "HOST TESTS FAILED"; exit 1; }

@@ -85,6 +85,9 @@ static void felucca_init(void)
  * reset), a hang (a WDT reset) or a failed boot (bootguard: the last one died within its first 30 s): straight to the
  * UI. The UBOOT paths never get here. */
 static uint32_t crash_seen __attribute__((section(".noinit")));   /* fm1_crash.count at the last boot */
+#if !(FELUCCA_PLUGINS_FM1 && FELUCCA_FLASH)
+#define PLG_FM1_RUNNING 0
+#endif
 static uint8_t boot_clean;                    /* no crash, hang (WDT) or failed boot before this one (boot_leds):
                                                * the sweep runs and the autosave is restored (project.c autosave_boot) */
 static void boot_leds(void)
@@ -110,6 +113,10 @@ static void fm1_main(void)
         ota_boot_cleanup();                             /* staging area left by an update */
 #endif
     settings_init();
+#if FELUCCA_PLUGINS_FM1 && FELUCCA_FLASH
+    /* the plugin engines (plugin_fm1.c), before the parts get their sounds; none after a crash in their code */
+    plg_fm1_boot(fm1_crash.magic == FM1_CRASH_MAGIC && fm1_crash.count != crash_seen);
+#endif
     usb_serial_apply();                                 /* (#67: the saved USB SERIAL before usb_start) */
     lcd_init();
     draw_splash();                                      /* ui_draw.c (1.1.5) */
@@ -133,7 +140,7 @@ static void fm1_main(void)
     master_boot();
     kb_boot_hold = 1;                         /* #137: no notes from the keys before the UI (seq.c keyboard_block) */
 #if FELUCCA_CPU2
-    if (!bootguard.failed && (ui_prefs2 & (PREF_CPU2_ON >> 16))) {
+    if (!bootguard.failed && (ui_prefs2 & (PREF_CPU2_ON >> 16)) && !PLG_FM1_RUNNING) {
         /* the second core (felucca-bsp chip/fm1_cpu1.h; fx.c mix_block hands it parts), at power-on, before the
          * audio and the timers (started later it never reaches its entry). It starts in the chip's ROM: fm1_cpu1_start
          * opens the PC limits meanwhile. MENU > 2ND CORE OFF (the default), a crash in the last boot's first 30 s, or
@@ -236,6 +243,15 @@ static void fm1_main(void)
                 ota_session();                          /* returns only if nothing was committed */
             lcd_fill(0, 0, 240, 240, T_BG);
             ui.force = 1;
+        }
+#endif
+#if FELUCCA_PLUGINS_FM1 && FELUCCA_FLASH && FELUCCA_OTA
+        if (plg_fm1_restart && (int32_t)(fm1_ms - plg_fm1_restart) >= 0) {   /* the editor's PLUGIN RESTART */
+            fm1_audio_stop();
+            usb_detach();
+            fm1_delay_ms(30);
+            bootguard.pending = 0;
+            fm1_reboot();
         }
 #endif
         if (usb.uboot_req) {                            /* SysEx F0 22 24 35 7D F7 from the host */

@@ -4,12 +4,13 @@
 """Rasterise the Fukiai icon font (web/fukiai.ttf, MIT, (c) Hügelton Instruments) into
 4-bit alpha icon cells for the UI (run by tools/build.py generate()).
 
-  gen_aa_icons.py OUT.h [--font web/fukiai.ttf] [--sizes 12,16] [--big NAME,NAME,...]
+  gen_aa_icons.py OUT.h [--table TABLE.py] [--font web/fukiai.ttf] [--sizes 12,16] [--big NAME,NAME,...]
                         [--gamma G] [--prefix ICON_] [--list] [--report]
 
 Every icon the firmware already names (assets/icons.json, ICON_<NAME>; icons.c keeps
-choosing which one a parameter gets) is mapped to a Fukiai glyph by LEGACY below, and the icons the
-UI adds (transport, tracks 1-4, USB, favourites, ...) by EXTRA (ICON_X_<NAME>).
+choosing which one a parameter gets) is mapped to a Fukiai glyph by the table's LEGACY, and the icons the
+UI adds (transport, tracks 1-4, USB, favourites, ...) by its EXTRA (ICON_X_<NAME>). The table is
+tools/ui_tables/felucca_icons.py; another UI on this pipeline gives its own with --table.
 
 Output: per size S in --sizes
   AI<S>_DATA    cells of S x S px, 4-bit alpha, rows back to back, each cell a byte-aligned bit stream of the
@@ -33,70 +34,6 @@ from gen_aa_font import huff_pack, huff_unpack  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# legacy icon name (assets/icons.json) -> Fukiai glyph name. Chosen from the glyph names only
-# (the semantics: ADSR stage icons for ATK/DEC/SUS/REL, filter response for CUT/RES, ...): review the
-# result in the icon specimen of the UI renders and adjust the table, nothing else changes.
-LEGACY = {
-    "generic": "ui_knob", "attack": "function_env_adsr_attack", "decay": "function_env_adsr_decay",
-    "sustain": "function_env_adsr_sustain", "release": "function_env_adsr_release", "env": "function_env_adsr_lin",
-    "cutoff": "function_filter_lpf", "reso": "function_filter_lpf_peak", "rate": "symbol_speed",
-    "lfo_wave": "waveform_sine", "wave": "waveform_variant", "pulse": "waveform_pulse_quarter",
-    "shape": "waveform_variant_four", "pitch": "waveform_pitch", "tune": "symbol_tuning",
-    "detune": "function_phaseout", "transpose": "control_arrow_up_down", "octave": "control_arrow_up",
-    "level": "symbol_volume", "pan": "symbol_pan", "mute": "control_speaker_mute",
-    "dist": "function_signal_clip", "drive": "symbol_diode", "fold": "waveform_fold", "bits": "function_mask",
-    "chorus": "symbol_waves", "delay": "symbol_echo", "reverb": "symbol_spring", "feedback": "symbol_feedback",
-    "arp": "control_arrow_loop", "gate": "function_gate_unipolar", "swing": "symbol_swing",
-    "tempo": "symbol_tempo", "scale": "control_arow_scale", "quantize": "symbol_grid",
-    "glide": "symbol_transition", "slide": "symbol_rise", "voice": "symbol_primitives_o", "mod": "symbol_modular",
-    "noise": "waveform_noise_white", "sub": "symbol_bass", "ratio": "function_multiply",
-    "algorithm": "symbol_node", "sample": "symbol_audio", "steps": "symbol_grid_nine", "accent": "symbol_thunder_f",
-    "time": "symbol_clock", "phase": "function_phase", "fade": "waveform_fade", "mix": "symbol_combine",
-    "keytrack": "symbol_keyboard", "size": "control_arrow_both", "damp": "symbol_weight",
-    "tone": "function_filter_band", "sweep": "symbol_warp", "vibrato": "waveform_cos", "loop": "waveform_loop",
-    "hold": "symbol_lock_close_f", "order": "symbol_sort", "prob": "symbol_dice",
-    "length": "control_arrow_end", "division": "note_quarter", "chip": "symbol_primitives_f",
-    "midi": "port_midi", "save": "symbol_download_as", "load": "symbol_folder_open", "clear": "symbol_trash",
-    "w_sin": "waveform_sine", "w_tri": "waveform_triangle_ac", "w_saw": "waveform_sawtooth_ac",
-    "w_sqr": "waveform_square", "w_pls": "waveform_pulse_quarter", "w_pwm": "waveform_pulse_half",
-    "w_sh": "waveform_noise_step", "w_dsin": "function_signal_double", "w_spls": "waveform_pulse_eighth",
-    "w_rsaw": "waveform_sawtooth_ac_inv", "w_rtri": "waveform_triangle_dc", "w_rtrp": "waveform_triangle_dc_inv",
-    "tape": "symbol_tape", "mouth": "symbol_mouth", "trio": "symbol_primitives_o",
-    "drawbar": ("symbol_drawbar", "ui_slider_vertical"), "slice": "symbol_comb", "grain": "symbol_cloud_o", "phys": "symbol_pick",
-    "drum": "symbol_drum",
-}
-
-# icons the redesign adds (header, dialogs, lists, menu); name -> Fukiai glyph
-EXTRA = {
-    # (1.1: the ones no screen draws are gone: x_pause x_play_o x_star_o x_check x_power x_doc x_plus x_minus
-    #  x_undo x_redo x_palette x_back x_down x_up x_hugelton x_fx x_timer; add one back with its first use)
-    "x_play": "control_play_f", "x_stop": "control_stop_f", "x_rec": "control_rec_f", "x_rec_o": "control_rec_o",
-    # (1.0.2: the tracks' circled numerals are no longer baked: icons.c trk_icon draws a digit on a cushion)
-    "x_usb": "port_usb_c", "x_star": "symbol_star", "x_cog": "symbol_cog", "x_lock": "symbol_lock_close_f",
-    "x_folder": "symbol_folder", "x_warn": "symbol_error", "x_speaker": "control_speaker_2", "x_info": "symbol_info_f",
-    "x_left": "symbol_carret_left", "x_right": "symbol_carret_right",
-    # page and state icons (Fukiai 0.8.0): MIXER / PHRASES / SONG pages, motion, calibration, the battery
-    # (battery_2 is not used: the stock level 0..3 maps to battery_0 / 1 / 3 / 4, see ui_draw.c batt_icon)
-    "x_mixer": "ui_slider_vertical", "x_pattern": "symbol_grid_nine", "x_song": "symbol_disc",
-    "x_motion": "symbol_motion", "x_motion_rec": "symbol_motion_rec", "x_motion_del": "symbol_motion_delete",
-    "x_doctor": "symbol_doctor", "x_bat0": "system_battery_0", "x_bat1": "system_battery_1",
-    "x_bat3": "system_battery_3", "x_bat4": "system_battery_4", "x_bat_chg": "system_battery_charging",
-    # the FX hold layer (ui_draw.c draw_layer, Fukiai 0.8.3) and the HOLD menu row
-    "x_knob": "ui_knob", "x_hpf": "function_filter_hpf",
-    "x_repeat": "control_arrow_loop", "x_reverse": "control_reverse_f", "x_tstop": "symbol_stop",
-    "x_freeze": "symbol_freeze",
-    # OCT UP / OCT DN (the harmonizer): stand-ins until Fukiai has a pitch-shift glyph;
-    # the first of each tuple the font has
-    "x_oct_up": ("symbol_pitch_up", "control_arrow_up"), "x_oct_dn": ("symbol_pitch_down", "control_arrow_down"),
-    # a missing sample (the header message, the SLICES page): SAMPLE NOT FOUND
-    "x_nofile": "symbol_document_disabled",
-    # the MENU's tabs (ui_menu.c, 1.0.5): DISPLAY (CONTROL x_knob, AUDIO x_speaker, 1.2 MIDI midi, SYSTEM x_cog)
-    "x_eye": "symbol_eye",
-}
-
-# a glyph given as a tuple: the first one the font has (a glyph still to be drawn falls back to a stand-in;
-# a missing preferred glyph never breaks the build). WHEEL: symbol_drawbar once Fukiai has it.
-
 # glyphs broken in the font, mended before rasterising (a mended font needs no change here: a glyph already
 # on the em, advance == unitsPerEm, is left alone). Fukiai 0.8.0 system_battery_0: drawn at the wrong scale
 # (advance 4653, outline 4654 x 2048 units on a 2048 em) and with a filled copy of its counter (an extra
@@ -104,25 +41,18 @@ EXTRA = {
 # with the box of a counter but the outside's winding) and the rest fitted into the outline box of a sibling.
 FIT_TO = {"system_battery_0": "system_battery_4"}
 
-# new icons that are also needed at 12 px (list rows, menu values)
-SMALL_EXTRA = ["x_star", "x_lock", "x_cog", "x_usb", "x_warn", "x_folder", "x_left", "x_right",
-               "x_mixer", "x_pattern", "x_song", "x_motion", "x_motion_rec", "x_motion_del",
-               "x_hpf", "x_repeat", "x_reverse", "x_tstop", "x_freeze"]
-# legacy names no screen draws (1.1): kept in the enum (assets/icons.json's order), not rasterised (no cell)
-NOT_DRAWN = ["tape"]
+# the icon set (tools/ui_tables/felucca_icons.py, or --table): LEGACY, EXTRA, SMALL_EXTRA, NOT_DRAWN, HUGE_DEFAULT,
+# BIG_DEFAULT
+def load_table(path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("icon_table", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
-# the 24 px set: the header battery (Fukiai's battery is a wide, short glyph: at 16 px its body was 12 x 6)
-# (up to 1.1.5 also the FX map's effect cells; 1.2's map names the 16 keys' effects instead, ui_layer.c layer_fx)
-HUGE_DEFAULT = ["x_bat0", "x_bat1", "x_bat3", "x_bat4", "x_bat_chg", "x_usb"]   # (+ the USB-C plug: as flat)
 
-# the 16 px set: header, footer, dialogs and menu rows (everything else only exists at 12 px)
-# (1.0.5: the MENU rows lost their icons, the tabs carry them)
-BIG_DEFAULT = ["x_play", "x_stop", "x_rec", "x_rec_o", "x_usb", "x_star",
-               "x_cog", "x_warn", "x_speaker", "x_info", "x_eye", "midi",
-               "wave", "algorithm", "phase", "bits", "sample", "mouth", "trio", "drawbar", "slice", "grain",
-               "phys", "drum", "noise", "mod", "tempo",
-               "x_song", "x_motion", "x_motion_del", "x_doctor", "x_knob", "rate", "x_bat0", "x_bat1", "x_bat3", "x_bat4", "x_bat_chg",
-               "x_nofile"]
+TABLE = Path(__file__).resolve().parent / "ui_tables" / "felucca_icons.py"
+
 
 
 def glyph_table(font_path):
@@ -217,12 +147,17 @@ def main():
     ap.add_argument("--font", default=str(ROOT / "web" / "fukiai.ttf"))
     ap.add_argument("--json", default=str(ROOT / "assets" / "icons.json"), help="legacy icon names (order = enum)")
     ap.add_argument("--sizes", default="12,16,24")
-    ap.add_argument("--big", default=",".join(BIG_DEFAULT))
+    ap.add_argument("--table", default=str(TABLE), help="the icon set (default tools/ui_tables/felucca_icons.py)")
+    ap.add_argument("--big", help="the 16 px set, NAME,NAME,... (default the table's BIG_DEFAULT)")
     ap.add_argument("--gamma", type=float, default=1.0)
     ap.add_argument("--prefix", default="ICON_", help="enum prefix (the preview uses XI_ next to the firmware's ICON_)")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--report", action="store_true")
     a = ap.parse_args()
+    t = load_table(a.table)
+    LEGACY, EXTRA, SMALL_EXTRA, NOT_DRAWN, HUGE_DEFAULT = t.LEGACY, t.EXTRA, t.SMALL_EXTRA, t.NOT_DRAWN, t.HUGE_DEFAULT
+    if a.big is None:
+        a.big = ",".join(t.BIG_DEFAULT)
     cps = glyph_table(a.font)
     if a.list:
         for name, cp in sorted(cps.items(), key=lambda kv: kv[1]):

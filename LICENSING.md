@@ -40,7 +40,7 @@ entry and libc; and the FM-1's board code: keys, LEDs, audio, display, ADC) is f
 Public License 2.0 (`SPDX-License-Identifier: MPL-2.0`, `firmware/bsp/LICENSE`, also
 `LICENSES/MPL-2.0-felucca-bsp.txt`; its authors and origins in `firmware/bsp/NOTICE`). Felucca builds
 `firmware/bsp/chip/` and `firmware/bsp/boards/fm1/` with its own code; `firmware/hal/fm1_uart.h` (GPL-3.0-only) is
-Felucca's own and is used instead of the BSP's. AFTERTOUCH's key readings, `firmware/src/keytouch.{c,h}`, are
+Felucca's own and is used instead of the BSP's, and so is `firmware/hal/fm1_plugin_hal.h` (GPL-3.0-only: the plugin area's PC limit). AFTERTOUCH's key readings, `firmware/src/keytouch.{c,h}`, are
 MPL-2.0 too: a port of charlesvestal's fm1-base (<https://github.com/charlesvestal/fm1-base>, `lib/sense.c`,
 `lib/touch.c`, MPL-2.0). The firmware built with them is GPL-3.0-only as a whole; the MPL files stay MPL-2.0, and
 their source is part of Felucca's complete source as the engines' is.
@@ -48,6 +48,30 @@ their source is part of Felucca's complete source as the engines' is.
 You may use, study, change and share Felucca under the GPL. If you distribute Felucca, or
 firmware derived from it, you must also give your recipients its complete corresponding
 source under the same licence. That includes devices that ship with modified Felucca inside.
+
+## Plugin engines
+
+From 1.9, Felucca loads sound engines at run time, as plugins ([docs/PLUGINS.md](docs/PLUGINS.md)). The plugin
+interface (`felucca_plugin.h`, `felucca_plugin_fm1.h` and `felucca_engine.h` of Felucca-Engines) is MIT. Felucca
+itself stays GPL-3.0-only, and adds this permission for the plugins:
+
+> **Additional permission under GNU GPL version 3 section 7**
+>
+> A "Plugin" is a sound engine built separately from Felucca against the Felucca plugin interface (the files
+> `felucca_plugin.h`, `felucca_plugin_fm1.h` and `felucca_engine.h` of Felucca-Engines), which interacts with Felucca
+> only through that interface: Felucca loads it at run time and calls the functions that its descriptor names, and the
+> Plugin uses only what the interface hands it. A Plugin contains no part of Felucca that is covered by the GPL.
+>
+> As the copyright holder of Felucca, Leo Kuroshita (Hügelton Instruments) gives you permission to make, use, copy,
+> modify and distribute a Plugin under terms of your choice, to run it with Felucca, and to distribute it together with
+> Felucca, without the GPL applying to the Plugin. The GPL still applies to Felucca itself in full, modified or not,
+> including when it is distributed together with Plugins.
+>
+> If you modify Felucca, you may extend this permission to your version of it, but you are not obliged to. If you do
+> not wish to, delete this permission from your version.
+
+Felucca's own repository holds only GPL code: its plugins (the standard ones Felucca may ship) are GPL. Plugins made by
+others live outside it, under the licences their authors choose.
 
 ## Hügelton Instruments' own work
 
@@ -60,7 +84,7 @@ All by Hügelton Instruments (Leo Kuroshita), in this tree:
 | The Hügelton Sample Pack: Felucca's drum sounds, made by `tools/gen_waves.py`, from which the SLICE engine's BREAK is built; the script and the sounds it makes | CC0 1.0 (<https://creativecommons.org/publicdomain/zero/1.0/>) | `tools/gen_waves.py` |
 | The controls picture | GPL-3.0-only | `docs/controls.jpg` |
 | The Fukiai icon font (<https://github.com/hugelton/Fukiai>): the firmware's icons (rasterised at build time by `tools/gen_aa_icons.py`) and the web editor's | MIT | `web/fukiai.ttf`, `LICENSES/MIT-Fukiai.txt`, `web/FUKIAI-LICENSE.txt` |
-| The ANALOG, LOFI, TRIO, WHEEL, NOISE and PHASE engines, the engine interface and the shared DSP helpers: Felucca-Engines (<https://github.com/hugelton/Felucca-Engines>) | MIT | `firmware/engines/`, `LICENSES/MIT-Felucca-Engines.txt` |
+| The ANALOG, LOFI, TRIO, WHEEL, NOISE and PHASE engines, the engine interface, the plugin interface and its tools, and the shared DSP helpers: Felucca-Engines (<https://github.com/hugelton/Felucca-Engines>) | MIT | `firmware/engines/`, `LICENSES/MIT-Felucca-Engines.txt` |
 
 ## Third-party material
 
@@ -72,6 +96,7 @@ All by Hügelton Instruments (Leo Kuroshita), in this tree:
 | Rings by Emilie Gillet (<https://github.com/pichenettes/eurorack>): the PHYS engine's sympathetic strings, ported to fixed point | MIT | `firmware/src/phys_symp.c`, `LICENSES/MIT-Rings.txt` |
 | snes_spc 0.9.0 by Shay Green (<http://www.slack.net/~ant/>): the ADPCM engine's DSP (BRR decoding, Gaussian interpolation, ADSR and GAIN envelopes, noise, echo and FIR), ported to C one voice at a time by ugotworms; `tools/gen_adpcm.py`'s BRR decoder follows its `decode_brr`. Built only with `FELUCCA_ADPCM=1` (off by default) | LGPL-2.1-or-later | `firmware/src/adpcm_dsp.c`, `LICENSES/LGPL-2.1-snes_spc.txt` |
 | msfa by Google Inc. and Pascal Gauthier, from Dexed (<https://github.com/asb2m10/dexed>): the FM6 engine's synthesis, ported to integer C (Dexed itself is GPL-3.0; only msfa is used; the FM6 factory patches are Felucca's own) | Apache-2.0 | `firmware/src/fm6_core.c`, `LICENSES/Apache-2.0-msfa.txt` |
+| libretro.h, the libretro API header by The RetroArch team (<https://github.com/libretro/RetroArch>): the interface the libretro core (`platforms/libretro`) is built against, as it is | MIT | `platforms/libretro/libretro.h` (its licence at the top of the file) |
 | klattsch by Tony Gies (<https://github.com/tgies/klattsch>): design reference for the VOICE engine; no code copied. Formant data from Klatt (1980) / Hillenbrand et al. (1995) | MIT (klattsch) | credit only |
 | X0X by charlesvestal (<https://github.com/charlesvestal/fm1-x0x>), a Felucca fork: the design of the browser emulator (the worklet, the device clock driven by its audio, the exports); its files credit it in their headers | GPL-3.0 | `web/emu/` |
 | The second core: Melodee's by keremimo (<https://github.com/keremimo/melodee>), in felucca-bsp under MPL-2.0 by agreement, with charlesvestal's start and API (X0X, <https://github.com/charlesvestal/fm1-x0x>) | MPL-2.0 | `firmware/bsp/chip/fm1_cpu1.{h,S}`, `firmware/bsp/NOTICE` |

@@ -1016,6 +1016,40 @@ knob turn picks a built-in palette. A preview by the slider is op 0 sent at most
 settings changes only with op 1. Example: `F0 7D 46 4C 51 01 01 02 05 03 04 0A 06 ...` is op 1 with color1 = (r 1, g 2, b 5),
 color2 = (3, 4, 10), ...
 
+## Plugin engines (82-87; 1.9)
+
+From 1.9 the FM-1 loads plugin engines from two slots in its flash, outside the firmware's area (`docs/PLUGINS.md`;
+`firmware/src/plugin_fm1.c`, `firmware/src/editor_plugin.c`; the blob format is Felucca-Engines'
+`src/felucca_plugin_fm1.h`). These commands list, write and erase the slots. A 32-bit value goes as five 7-bit bytes,
+an offset in a slot as three, LSB first. INFO advertises `58 01 n` (n: the plugin engines listed, 0 with none) after
+`45 01 5`; firmware without the tag answers none of these commands. A build without the flash answers each with the
+single byte 1.
+
+| cmd | Request args | Reply args |
+| --- | --- | --- |
+| 82 PLUGIN_INFO | — | ABI (1), slots (2), per slot: state, id (u32), version (u32), the number it plays as (127: a number of its own not given yet), its name (ASCII, 0-terminated, at most 16); then the numbers given: count, per one its number − 32 and its id (u32) |
+| 83 PLUGIN_ERASE | slot | slot, rc: the slot's plugin taken out of the engines (its number plays what it played before), its flash erased; the numbers' list is kept |
+| 84 PLUGIN_WRITE | slot, offset (3 bytes, a multiple of 256), pack7 data (at most 256 bytes) | slot, offset (3 bytes), rc: into an erased slot |
+| 85 PLUGIN_REG | id (u32) | the number − 32, rc: the number of a plugin of its own, given once and kept |
+| 86 PLUGIN_RESTART | — | 0, then the FM-1 restarts (plugins load at power-on) |
+| 87 PLUGIN_ENGINES | — | count, per engine of a plugin listed after Felucca's (the ENG knob's order): its number, its name (at most 8) |
+
+States: 0 empty, 1 playing, 2 not a good blob (header, CRC, sizes), 3 refused (the plugin's own checks: ABI, rate,
+voices, parts, memory, functions), 4 skipped after a crash (a crash inside a plugin in the last boot: no plugin is called
+until the next power-on after that), 5 no number (a plugin of its own whose id has no number: send PLUGIN_REG first).
+rc: 0 done, 1 bad arguments, 2 the flash failed, 3 the slot is playing (erase it first), 4 the list is full, 5 the
+data would put an update record's mark ("AT") at byte 0xF06 of a sector (felucca-bsp `fm1_flash.h`; the packer moves the
+code instead).
+
+Installing a blob (`tools/fm1_plugin.py install`): read the blob's header (`fe_fm1_hdr_t`: its slot, id and engine);
+for a plugin of its own (engine 255, FE_NEW) PLUGIN_REG its id; PLUGIN_ERASE the slot; PLUGIN_WRITE it 256 bytes at a
+time; PLUGIN_RESTART. The numbers 32 .. 94 go to plugins of their own in the order they are registered; 95 is never
+given (a project's track of a plugin the device has never had plays as 95, NO PLUGIN, and keeps the plugin's id).
+
+The engines of plugins answer `DESC` and `NAMES` as Felucca's do (by their number). A project's track on a plugin of
+its own keeps the plugin's id (its FM6 patch's bytes: "PLG1" and the id's four characters), so a project moved to
+another FM-1 plays the plugin under that FM-1's number for it (`firmware/src/project.c` proj_plugin_*).
+
 ## Tagged device preferences v1
 
 INFO appends `0x55, 1, uiCaps` after the existing `NTRK, CHAIN_ROWS` bytes.

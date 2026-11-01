@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* MIDI in for platforms/linux/felucca_sdl.c: channel messages into the device as USB MIDI packets arrive
- * (felucca_web.c web_midi: notes, CC, program change, pressure, pitch bend; not the clock or SysEx yet).
+/* MIDI in for platforms/sdl/felucca_sdl.c: channel messages into the device as USB MIDI packets arrive
+ * (felucca_host.c fh_midi: notes, CC, program change, pressure, pitch bend; not the clock or SysEx yet).
  *   - Linux, FELUCCA_ALSA (build.sh: when pkg-config finds alsa): an ALSA sequencer port "Felucca", subscribed to
  *     every source there at start (others: aconnect);
  *   - macOS: CoreMIDI, a virtual destination "Felucca" and every source there at start;
  *   - else: none.
  * midi_poll runs on the main loop (the device is the main loop's only); CoreMIDI's thread only fills a ring. */
 static uint32_t midi_count;                     /* messages into the device (felucca_sdl.c --midi-check) */
-#define MIDI_IN(st, d1, d2) (midi_count++, web_midi((st), (d1), (d2)))
+#define MIDI_IN(st, d1, d2) (midi_count++, fh_midi((st), (d1), (d2)))
 
 #if defined(__APPLE__)
 #include <CoreMIDI/CoreMIDI.h>
@@ -56,26 +56,14 @@ static int midi_byte(uint8_t *b)
     __atomic_store_n(&midi_r, r + 1u, __ATOMIC_RELEASE);
     return 1;
 }
-static void midi_poll(void)                     /* the bytes, running status, into messages */
+static mpar_t midi_par;                       /* (platforms/common/midi_parse.c) */
+static void midi_poll(void)                     /* the bytes into messages */
 {
-    static uint8_t st, d[2], nd, sysex;
     uint8_t b;
     while (midi_byte(&b)) {
-        if (b >= 0xF8u)                         /* (real time: the clock, not yet) */
-            continue;
-        if (b >= 0x80u) {
-            sysex = b == 0xF0u;
-            st = b < 0xF0u ? b : 0;
-            nd = 0;
-            continue;
-        }
-        if (sysex || !st)
-            continue;
-        d[nd++] = b;
-        if (nd == ((st & 0xE0u) == 0xC0u ? 1u : 2u)) {     /* (program change, channel pressure: one byte) */
-            MIDI_IN(st, d[0], nd > 1u ? d[1] : 0u);
-            nd = 0;
-        }
+        uint32_t n = midi_par.count;
+        mpar_byte(&midi_par, b);
+        midi_count += midi_par.count - n;
     }
 }
 static void midi_close(void)

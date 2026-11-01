@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
-// The browser build (build/emu/felucca.wasm, web/emu/felucca_web.c) in Node, as the worklet runs it. After X0X's
+// The browser build (build/web/felucca.wasm, platforms/host/felucca_host.c) in Node, as the worklet runs it. After X0X's
 // tests/host/emu_test.mjs (charlesvestal/fm1-x0x, GPL-3.0).
-//   node web/emu/emu_test.mjs build/emu/felucca.wasm [NATIVE.f32]
+//   node platforms/web/emu_test.mjs build/web/felucca.wasm [NATIVE.f32]
 // Checks: it boots (splash, then HOME on the screen, the HOME LED; the power-on LED sweep under the splash, over by
 // 1 s), a held key sounds and lights its LED, PLAY
 // starts the sequencer (PLAY's green LED), a user preset saved from the panel (SAVE, OCT+, OCT+) reaches the flash,
 // and the flash sectors kept as the page keeps them bring it back in a fresh instance; the same gestures twice
-// give the same audio (deterministic), with NATIVE.f32 (web/emu/native_check.c) the native build's, bit for bit.
+// give the same audio (deterministic), with NATIVE.f32 (platforms/web/native_check.c) the native build's, bit for bit.
 // Then the cost: 1 s of a heavy song (FM6, PHYS, GRAIN chords, DRUM) against real time (BENCH_MAX, default 0.5:
 // fails above half of real time on this machine).
 import fs from "fs";
 import { storeSectors, restoreSectors, midiKnob, KNOB_CC, MASTER_CC } from "./worklet.js";
 
-const wasmPath = process.argv[2] || "build/emu/felucca.wasm", nativePath = process.argv[3];
+const wasmPath = process.argv[2] || "build/web/felucca.wasm", nativePath = process.argv[3];
 const bytes = fs.readFileSync(wasmPath);
 const B = { FX: 0, SCL: 1, ENV: 2, LFO: 3, EDIT: 4, GLO: 5, HOME: 6, SAVE: 7, ARP: 8, SEQ: 9, PLAY: 10, REC: 11, OCTDN: 12, OCTUP: 13 };
 const EN = { SELECT: 0, ALGO: 1, PRESETS: 2, K1: 3, K2: 4, K3: 5, K4: 6 };
@@ -24,16 +24,16 @@ async function device(saved) {
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const ex = instance.exports, mem = ex.memory;
   ex._initialize();
-  ex.web_nor_erase();
-  if (saved) restoreSectors(new Uint8Array(mem.buffer, ex.web_nor(), ex.web_nor_size()), saved);
-  ex.web_boot();
+  ex.fh_nor_erase();
+  if (saved) restoreSectors(new Uint8Array(mem.buffer, ex.fh_nor(), ex.fh_nor_size()), saved);
+  ex.fh_boot();
   const d = { ex, mem, peak: 0, sig: 0, rec: false, frames: 0, kept: [] };
   d.render = (ms) => {
     const n = Math.round(ms * 44.1);
     for (let k = 0; k < n; k += 128) {
       const m = Math.min(128, n - k);
-      ex.web_render(m);
-      const l = new Float32Array(mem.buffer, ex.web_out_l(), m), r = new Float32Array(mem.buffer, ex.web_out_r(), m);
+      ex.fh_render(m);
+      const l = new Float32Array(mem.buffer, ex.fh_out_l(), m), r = new Float32Array(mem.buffer, ex.fh_out_r(), m);
       for (let i = 0; i < m; i++) {
         d.peak = Math.max(d.peak, Math.abs(l[i]), Math.abs(r[i]));
         if (d.rec) {
@@ -44,10 +44,10 @@ async function device(saved) {
       d.frames += m;
     }
   };
-  d.tap = (b) => { ex.web_buttons(1 << b); d.render(60); ex.web_buttons(0); d.render(60); };
-  d.turn = (role, n) => { for (let i = 0; i < Math.abs(n); i++) { ex.web_enc(role, Math.sign(n)); d.render(40); } };
+  d.tap = (b) => { ex.fh_buttons(1 << b); d.render(60); ex.fh_buttons(0); d.render(60); };
+  d.turn = (role, n) => { for (let i = 0; i < Math.abs(n); i++) { ex.fh_enc(role, Math.sign(n)); d.render(40); } };
   Object.defineProperty(d, "samples", { get: () => new Float32Array(d.kept) });
-  d.screen = () => new Uint16Array(mem.buffer, ex.web_screen(), 240 * 240).slice();
+  d.screen = () => new Uint16Array(mem.buffer, ex.fh_screen(), 240 * 240).slice();
   return d;
 }
 const colours = (fb) => new Set(fb).size;
@@ -58,49 +58,49 @@ a.render(200);
 const splash = colours(a.screen());
 { // the power-on LED sweep (bsp/boards/fm1/fm1_led_anim.h) under the splash: at 200 ms its head on the middle of the keyboard, the
   // keys it passed glowing (DIM HI), the ones ahead dark, the buttons not yet; the UI's LEDs untouched until it ends
-  const p = a.ex.web_anim_levels(), lv = p ? Array.from(new Uint8Array(a.mem.buffer, p, 41)) : [];
+  const p = a.ex.fh_anim_levels(), lv = p ? Array.from(new Uint8Array(a.mem.buffer, p, 41)) : [];
   const keys = lv.slice(14), head = keys.indexOf(Math.max(...keys.map((q) => q & 127)) | 128);
   check(`power-on LED sweep: at 200 ms the head on key ${head}, glow behind, dark ahead, buttons dark`,
         lv.length === 41 && head >= 8 && head <= 18 && keys.slice(0, head - 6).every((q) => q === 128) &&
         keys.slice(head + 3).every((q) => q === 0) && lv.slice(0, 14).every((q) => q === 0) &&
-        a.ex.web_lit_keys() === 0 && a.ex.web_lit_buttons() === 0);
+        a.ex.fh_lit_keys() === 0 && a.ex.fh_lit_buttons() === 0);
 }
 a.render(800);
-check("  over by 1 s (~0.70 s)", a.ex.web_anim_levels() === 0);
+check("  over by 1 s (~0.70 s)", a.ex.fh_anim_levels() === 0);
 const home = a.screen();
 check(`boots: the splash, then HOME (${colours(home)} colours), the HOME LED lit`,
-      splash > 1 && colours(home) > 4 && (a.ex.web_lit_buttons() >> B.HOME & 1) === 1);
+      splash > 1 && colours(home) > 4 && (a.ex.fh_lit_buttons() >> B.HOME & 1) === 1);
 check("silent at rest", a.peak === 0);
-a.ex.web_keys(1 << 7);                                        // C4
+a.ex.fh_keys(1 << 7);                                        // C4
 a.render(300);
-const keyLit = (a.ex.web_lit_keys() >> 7) & 1;
-a.ex.web_keys(0);
+const keyLit = (a.ex.fh_lit_keys() >> 7) & 1;
+a.ex.fh_keys(0);
 a.render(400);
 check(`a key sounds (peak ${a.peak.toFixed(3)}) and lights its LED`, a.peak > 0.01 && keyLit === 1);
 a.render(1500);
 a.peak = 0;
-a.ex.web_midi(0x90, 64, 100);                                  // Web MIDI: E4 on channel 1
+a.ex.fh_midi(0x90, 64, 100);                                  // Web MIDI: E4 on channel 1
 a.render(300);
-a.ex.web_midi(0x80, 64, 0);
+a.ex.fh_midi(0x80, 64, 0);
 a.render(300);
 check(`a MIDI note in (USB-MIDI's queue) sounds (peak ${a.peak.toFixed(3)})`, a.peak > 0.01);
-const draws = a.ex.web_screen_draws();
+const draws = a.ex.fh_screen_draws();
 a.turn(EN.K1, 3);
-check("KNOB 1 redraws the screen", a.ex.web_screen_draws() > draws);
+check("KNOB 1 redraws the screen", a.ex.fh_screen_draws() > draws);
 a.tap(B.PLAY);
 a.render(1000);
-check("PLAY: the sequencer runs, PLAY's green LED", a.ex.web_playing() === 1 && (a.ex.web_lit_buttons() >> 14 & 1) === 1);
+check("PLAY: the sequencer runs, PLAY's green LED", a.ex.fh_playing() === 1 && (a.ex.fh_lit_buttons() >> 14 & 1) === 1);
 a.tap(B.PLAY);
 a.render(300);
-check("PLAY again stops it", a.ex.web_playing() === 0);
-a.ex.web_buttons(1 << B.FX);                                  // #119: FX held, its map: the effects breathe
+check("PLAY again stops it", a.ex.fh_playing() === 0);
+a.ex.fh_buttons(1 << B.FX);                                  // #119: FX held, its map: the effects breathe
 a.render(800);
-const brK = a.ex.web_breath_keys(), brB = a.ex.web_breath_buttons(), litK = a.ex.web_lit_keys();
-a.ex.web_buttons(0);
+const brK = a.ex.fh_breath_keys(), brB = a.ex.fh_breath_buttons(), litK = a.ex.fh_lit_keys();
+a.ex.fh_buttons(0);
 a.render(300);
 check("FX held: its button and the effects' keys breathe, none lit; let go: nothing",
       (brB >> B.FX & 1) === 1 && brK !== 0 && (brK & litK) === 0 && litK === 0 &&
-      a.ex.web_breath_keys() === 0 && a.ex.web_breath_buttons() === 0);
+      a.ex.fh_breath_keys() === 0 && a.ex.fh_breath_buttons() === 0);
 { // the page's breathing peaks against the firmware's (bsp/boards/fm1/fm1_input.h FM1_LED_BREATH_PK / _LO, /256 of lit): the
   // colour at 50 % between the dark and the lit one by the LED's share, gamma-encoded (sRGB), within 0.06
   const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
@@ -120,14 +120,14 @@ check("FX held: its button and the effects' keys breathe, none lit; let go: noth
 }
 
 // ---- a user preset saved from the panel, kept across a fresh instance
-const w0 = a.ex.web_flash_writes_count();
+const w0 = a.ex.fh_flash_writes();
 a.tap(B.SAVE);
 a.tap(B.OCTUP);
 a.tap(B.OCTUP);
 a.render(200);
-const saved = storeSectors(new Uint8Array(a.mem.buffer, a.ex.web_nor(), a.ex.web_nor_size()));
+const saved = storeSectors(new Uint8Array(a.mem.buffer, a.ex.fh_nor(), a.ex.fh_nor_size()));
 check(`SAVE, OCT+, OCT+: user preset 1 written (${Object.keys(saved).length} sectors kept)`,
-      a.ex.web_test_user_preset(0) === 1 && a.ex.web_flash_writes_count() > w0 && Object.keys(saved).length > 0);
+      a.ex.fh_test_user_preset(0) === 1 && a.ex.fh_flash_writes() > w0 && Object.keys(saved).length > 0);
 const kept = JSON.parse(JSON.stringify(Object.fromEntries(     // as the page keeps them (base64 in localStorage)
   Object.entries(saved).map(([k, v]) => [k, Buffer.from(v).toString("base64")]))));
 const b = await device(Object.fromEntries(Object.entries(kept).map(([k, v]) => [k, new Uint8Array(Buffer.from(v, "base64"))])));
@@ -135,7 +135,7 @@ b.render(600);
 const c = await device(null);
 c.render(600);
 check("a fresh instance with the kept sectors has it; one without does not",
-      b.ex.web_test_user_preset(0) === 1 && c.ex.web_test_user_preset(0) === 0);
+      b.ex.fh_test_user_preset(0) === 1 && c.ex.fh_test_user_preset(0) === 0);
 
 // ---- the panel's knobs from a MIDI controller: the page turns them by midiKnob (worklet.js), as a drag does
 {
@@ -163,7 +163,7 @@ check("a fresh instance with the kept sectors has it; one without does not",
     m.render(1200);
     for (const v of vs) {
       const r = midiKnob(knob, cc, v, mode);
-      if (r.n) m.ex.web_enc(r.role, r.n);
+      if (r.n) m.ex.fh_enc(r.role, r.n);
       m.render(40);
     }
     if (mode !== "abs") m.render(40);                           // as many 40 ms steps as the four absolute values
@@ -178,7 +178,7 @@ check("a fresh instance with the kept sectors has it; one without does not",
 async function song() {
   const d = await device(null);
   d.render(500);
-  d.ex.web_test_heavy();
+  d.ex.fh_test_heavy();
   d.tap(B.PLAY);
   d.rec = true;
   d.render(2000);
@@ -186,7 +186,7 @@ async function song() {
 }
 const s1 = await song(), s2 = await song();
 check(`the heavy song plays (peak ${s1.peak.toFixed(3)}), twice the same samples`, s1.peak > 0.05 && s1.sig === s2.sig);
-if (nativePath) {                                             // web/emu/native_check.c: the same song, built with cc
+if (nativePath) {                                             // platforms/web/native_check.c: the same song, built with cc
   const nat = new Float32Array(new Uint8Array(fs.readFileSync(nativePath)).buffer);
   const web = s1.samples;
   let diff = nat.length === web.length ? 0 : Infinity;

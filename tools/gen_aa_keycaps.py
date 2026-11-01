@@ -4,9 +4,10 @@
 """Pre-rendered keycaps ("cushions") and state badges for the UI, and the knob arc masks (run by
 tools/build.py generate()).
 
-  gen_aa_keycaps.py OUT.h
+  gen_aa_keycaps.py OUT.h [--table TABLE.py]
 
-Keycaps: a fixed set of labels (the hardware controls the hints name, the state badges), each a pill
+Keycaps: a set of labels (the table's LABELS, tools/ui_tables/felucca_keycaps.py: the hardware controls the hints
+name, the state badges; another UI gives its own with --table), each a pill
 KC_H px tall with corners of radius KC_R (about a third of the height), the label in Inter Tight
 KC_PX px / KC_WGHT centred in it by its ink. One 4-bit map per pill, two levels in one nibble, tinted at draw time
 with theme tokens (src/gfx.c cv_keycap; GREY stays gray, the dim state is just a tint):
@@ -37,15 +38,16 @@ KC_PX, KC_WGHT = 9, 600          # the label: Inter Tight 9 px / 600 (caps 7 row
 KC_H, KC_R, KC_PAD = 13, 4, 3    # the pill: 13 px tall, radius 4, 3 px each side of the label's ink
 KC_BASE = 10                     # baseline row: the caps on rows 3 .. 9
 
-# (C name, label): the controls the hints name (panel.c B_NAME / E_NAME, short), then the state badges
-LABELS = [("PRESETS", "PRESETS"), ("SELECT", "SELECT"), ("ALGO", "ALGO"), ("OCTDN", "OCT-"), ("OCTUP", "OCT+"),
-          ("PLAY", "PLAY"), ("REC", "REC"), ("SAVE", "SAVE"), ("EDIT", "EDIT"), ("SEQ", "SEQ"), ("GLO", "GLO"),
-          ("HOME", "HOME"), ("ARP", "ARP"), ("KEYS", "KEYS"), ("K1", "K1"), ("K2", "K2"), ("K3", "K3"), ("K4", "K4"),
-          ("MUTE", "MUTE"), ("ARM", "ARM"), ("HOLD", "HOLD"), ("ON", "ON"), ("OFF", "OFF"),
-          ("FX", "FX"), ("K14", "K1-4"), ("SCL", "SCL"), ("OCTPM", "OCT-/+"),
-          ("LFO", "LFO"), ("ENV", "ENV")]   # (1.5: HELP's hints, src/ui_help.c)
+# the labels and knob sizes (tools/ui_tables/felucca_keycaps.py, or --table): LABELS, KNOBS
+TABLE = Path(__file__).resolve().parent / "ui_tables" / "felucca_keycaps.py"
 
-KNOBS = [("BIG", 17), ("SMALL", 10)]   # outer radius; the ring is 2 px
+
+def load_table(path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("keycap_table", path)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
 
 
 def pill_cov(w, h, r):
@@ -113,7 +115,14 @@ def knob_quadrant(r):
 
 
 def main():
-    out = Path(sys.argv[1])
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("out")
+    ap.add_argument("--table", default=str(TABLE), help="labels and knobs (default tools/ui_tables/felucca_keycaps.py)")
+    a = ap.parse_args()
+    t = load_table(a.table)
+    LABELS, KNOBS = t.LABELS, t.KNOBS
+    out = Path(a.out)
     font = ar.open_font(FONT + f"@{KC_WGHT}", KC_PX)
     data, rows = bytearray(), []
     for cname, label in LABELS:

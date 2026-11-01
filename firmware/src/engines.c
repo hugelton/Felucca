@@ -48,8 +48,40 @@ static uint8_t eng_mem_owner[NPART];       /* engine index + 1 whose state is in
 #include "eng_adpcm.c"           /* ADPCM: BRR waves and an FIR echo, its DSP ported from snes_spc (adpcm_dsp.c, LGPL-2.1+) */
 #endif
 
-/* the editor protocol, user presets and projects store these indices: append, never reorder */
+#if FELUCCA_PLUGINS
+/* a number no engine plays here (a plugin's, not loaded; a later Felucca's): a sine at the note, as a missing sample
+ * (eng_sample.c smp_sine), and NO PLUGIN said (snd_missing) */
+#define MISS_P {"-", F_INT, 0, 127, 0, 0, 0}
+static const preset_t MISS_PRESETS[] = {{.name = "MISSING", .env = {0, 0, 127, 20}}};
+static void miss_on(track_t *t, voice_t *v) { (void)t, (void)v; }
+static void miss_render(track_t *t, voice_t *v, int32_t *out, uint32_t n, const vmod_t *m)
+{
+    uint32_t i, p = v->ph[0];
+    (void)t;
+    for (i = 0; i < n; i++, p += m->inc)
+        out[i] += voice_amp(sine_i(p) >> 1, m, i) << 1;
+    v->ph[0] = p;
+}
+static const engine_t ENG_MISSING = {
+    .name = "MISSING",
+    .page_title = {"MISSING", "MISSING"},
+    .edit = {MISS_P, MISS_P, MISS_P, MISS_P, MISS_P, MISS_P, MISS_P, MISS_P},
+    .presets = MISS_PRESETS,
+    .npresets = 1,
+    .knob = {P_ATK, P_DEC, P_SUS, P_REL},
+    .note_on = miss_on,
+    .render = miss_render,
+};
+#endif
+
+/* the editor protocol, user presets and projects store these indices: append, never reorder. With FELUCCA_PLUGINS
+ * a plugin can take an engine's place (plugin.c plg_add), so the table is in RAM then, and the numbers past
+ * Felucca's are ENG_MISSING until a plugin plays one */
+#if FELUCCA_PLUGINS
+static const engine_t *ENGINES[NENGINES] = {
+#else
 static const engine_t *const ENGINES[NENGINES] = {
+#endif
     &ENG_ANALOG,                 /* 0 */
 #if FELUCCA_FM4
     &ENG_DIGITAL,                /* 1 (ENGI_DIGITAL) */
@@ -72,6 +104,9 @@ static const engine_t *const ENGINES[NENGINES] = {
 #endif
 #if FELUCCA_ADPCM
     &ENG_ADPCM,                  /* 14 (ENGI_ADPCM; FELUCCA_ADPCM=0 builds without it) */
+#endif
+#if FELUCCA_PLUGINS
+    [NENG_BUILTIN ... NENGINES - 1] = &ENG_MISSING,
 #endif
 };
 
@@ -97,7 +132,8 @@ static void eng_mem_claim(const track_t *t)
     eng_mem_owner[p] = (uint8_t)(e + 1u);
 }
 
-/* the sample source a track's sound plays that has no data (SAMPLE's SET, GRAIN's SRC, SLICE's SRC: an empty or
+/* the sample source a track's sound plays that has no data (with plugins also: a plugin's engine number that no plugin
+ * plays here, code 128 and up) (SAMPLE's SET, GRAIN's SRC, SLICE's SRC: an empty or
  * invalid user slot, a set or PIANO this build lacks): its name (it plays a sine: eng_sample.c smp_sine), 0 = none;
  * *code a small number for it (1.., per engine and source) so the UI says it once (ui_input.c sample_notice) */
 static uint8_t snd_said[NTRK];   /* per track: the code last said, 0 = none (a project load clears them: said again) */
@@ -105,6 +141,12 @@ static const char *snd_missing(const track_t *t, uint32_t *code)
 {
     const engine_t *e = ENGINES[eng_idx(t->eng_req)];
     uint32_t si = (uint32_t)t->p[P_E0] % SMP_NALL;
+#if FELUCCA_PLUGINS
+    if (e == &ENG_MISSING) {                     /* a plugin's number, no plugin playing it: NO PLUGIN (128 ..) */
+        *code = 128u + eng_idx(t->eng_req) % 128u;
+        return "PLUGIN";
+    }
+#endif
 #if FELUCCA_SLICE
     if (e == &ENG_SLICE) {
         si = slc_src_of(t->p);
@@ -138,23 +180,54 @@ static const uint8_t ENGINE_ORDER[NENG_SHOWN] = {
 #endif
 };
 
-/* the engines one can pick (engine 1 only with FELUCCA_FM4), in ENGINE_ORDER: eng_ok(e), the n-th of them
- * eng_vis(n), e's place among them eng_rank(e), the next / previous one eng_step(e, dir) (wraps) */
-static int eng_ok(uint32_t e) { return e < NENGINES && (FELUCCA_FM4 || e != ENGI_DIGITAL); }
-static uint32_t eng_vis(uint32_t n) { return ENGINE_ORDER[n % NENG_SHOWN]; }
-static uint32_t eng_rank(uint32_t e)
+/* with plugins: ENGINE_ORDER, then the plugins of their own as they came (plugin.c plg_add), eng_nshown of them */
+#if FELUCCA_PLUGINS
+static uint8_t eng_order[NENG_SHOWN + NPLUG];
+static uint32_t eng_nvis;                    /* 0: not made yet */
+static uint32_t eng_nshown(void)
 {
     uint32_t n;
+    if (!eng_nvis) {
+        for (n = 0; n < NENG_SHOWN; n++)
+            eng_order[n] = ENGINE_ORDER[n];
+        eng_nvis = NENG_SHOWN;
+    }
+    return eng_nvis;
+}
+#define ENG_ORDER eng_order
+#else
+#define eng_nshown() NENG_SHOWN
+#define ENG_ORDER ENGINE_ORDER
+#endif
+
+/* the engines one can pick (engine 1 only with FELUCCA_FM4; with plugins, a number past Felucca's when a plugin plays
+ * it), in ENG_ORDER: eng_ok(e), the n-th of them eng_vis(n), e's place among them eng_rank(e), the next / previous one
+ * eng_step(e, dir) (wraps) */
+#if FELUCCA_PLUGINS
+static int eng_ok(uint32_t e)
+{
+    return e < NENG_BUILTIN ? FELUCCA_FM4 || e != ENGI_DIGITAL : e < NENGINES && ENGINES[e] != &ENG_MISSING;
+}
+#else
+static int eng_ok(uint32_t e) { return e < NENGINES && (FELUCCA_FM4 || e != ENGI_DIGITAL); }
+#endif
+static uint32_t eng_vis(uint32_t n) { uint32_t c = eng_nshown(); return ENG_ORDER[n % c]; }
+static uint32_t eng_rank(uint32_t e)
+{
+    uint32_t n, c = eng_nshown();
     if (!eng_ok(e))
         e = ENGI_FM6;                            /* (DIGITAL without FELUCCA_FM4: its sounds play as FM6) */
-    for (n = 0; n < NENG_SHOWN && ENGINE_ORDER[n] != e; n++)
+    for (n = 0; n < c && ENG_ORDER[n] != e; n++)
         ;
-    return n < NENG_SHOWN ? n : 0u;
+    return n < c ? n : 0u;
 }
 static uint32_t eng_step(uint32_t e, int32_t dir)
 {
-    return eng_vis((eng_rank(e % NENGINES) + (dir > 0 ? 1u : NENG_SHOWN - 1u)) % NENG_SHOWN);
+    uint32_t c = eng_nshown();
+    return eng_vis((eng_rank(e % NENGINES) + (dir > 0 ? 1u : c - 1u)) % c);
 }
+
+#include "plugin.c"
 
 /* factory sequence patterns: SAVE > PHRASES loads one into the selected track (ui.c pat_load); a preset
  * only suggests one with PAT(n), loading a sound never touches the steps. Absolute notes, loaded as they

@@ -855,6 +855,32 @@ static void proj_fetch(uint32_t slot)
 }
 #endif
 
+#if FELUCCA_PLUGINS
+/* 1.9: a track playing a plugin of its own (ENGI_PLUG0 and up: a number this device gave it) keeps the plugin's id in
+ * its FM6 patch's 128 bytes, which such a track does not use: "PLG1" and the id's four characters (FE_ID: printable,
+ * so every byte is 7-bit as the patches' are), the rest 0. On load, the track plays as the number this device has for
+ * the id (plugin.c plg_no_of), or ENGI_UNKNOWN (NO PLUGIN) keeping the id for the next save; its FM6 patch is FM6's
+ * INIT. Firmware before 1.9 never stores a number past its engines, and reads such a project as one of an engine it
+ * does not have (proj_engines_ok: not a project). */
+static const uint8_t PROJ_PLG_TAG[4] = {'P', 'L', 'G', '1'};
+static void proj_plugin_put(uint8_t *fm6, uint32_t id)
+{
+    uint32_t i;
+    for (i = 0; i < FM6_PACKED; i++)
+        fm6[i] = i < 4u ? PROJ_PLG_TAG[i] : i < 8u ? (uint8_t)(id >> (8u * (7u - i))) : 0u;
+}
+static uint32_t proj_plugin_get(const uint8_t *fm6)   /* the id kept, 0 = none */
+{
+    uint32_t i, id = 0;
+    for (i = 0; i < 4u; i++)
+        if (fm6[i] != PROJ_PLG_TAG[i])
+            return 0;
+    for (i = 4; i < 8u; i++)
+        id = id << 8 | fm6[i];
+    return plg_id_ok(id) ? id : 0u;
+}
+#endif
+
 static void project_capture(project_t *p)
 {
     uint32_t i;
@@ -874,6 +900,13 @@ static void project_capture(project_t *p)
         p->t[i].preset = trk[i].preset;
         memcpy(p->t[i].step, trk[i].step, sizeof trk[i].step);
         fm6_pack(fm6_patch[i], p->fm6[i]);
+#if FELUCCA_PLUGINS
+        if (trk[i].eng_req >= ENGI_PLUG0) {
+            uint32_t id = trk[i].eng_req == ENGI_UNKNOWN ? plg_track_id[i] : plg_id_of(trk[i].eng_req);
+            if (id)
+                proj_plugin_put(p->fm6[i], id);
+        }
+#endif
     }
     p->motion = motion;
     memcpy(p->mch, song.mch, sizeof p->mch);
@@ -1085,6 +1118,14 @@ static int project_restore_runtime(const project_t *input)
         track_t *t = &trk[k];
         const proj_trk_t *s = &p->t[k];
         uint32_t e = s->engine;                         /* (< NENGINES: proj_engines_ok) */
+#if FELUCCA_PLUGINS
+        uint32_t id = e >= ENGI_PLUG0 ? proj_plugin_get(p->fm6[k]) : 0u;
+        plg_track_id[k] = 0;
+        if (id && !(e = plg_no_of(id))) {               /* a plugin this device has no number for: NO PLUGIN, its id kept */
+            e = ENGI_UNKNOWN;
+            plg_track_id[k] = id;
+        }
+#endif
         t->eng_req = (uint8_t)e;
         t->user = 0;                                    /* (no user preset slot is saved) */
         for (i = 0; i < P_COUNT; i++) {                 /* every value back inside its range (param_fit) */
@@ -1096,7 +1137,11 @@ static int project_restore_runtime(const project_t *input)
         proj_steps(t->step);
         {   /* the project's own FM6 patch, never reloaded from SLOT: F n if it is that factory patch, else OWN */
             uint8_t v[FP_SIZE + 1u];
+#if FELUCCA_PLUGINS
+            fm6_unpack(s->engine >= ENGI_PLUG0 && proj_plugin_get(p->fm6[k]) ? FM6_INIT : p->fm6[k], v);
+#else
             fm6_unpack(p->fm6[k], v);
+#endif
             fm6_set_patch(k, v);
             fm6_adopt(k);
         }

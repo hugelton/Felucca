@@ -1426,9 +1426,9 @@ static void sample_notice(void)
             continue;
         snd_said[k] = (uint8_t)code;
         if (ui.msg_t)
-            str_cpy(ui.msg2, MSG_NO_SAMPLE, sizeof ui.msg2);
+            str_cpy(ui.msg2, MSG_MISSING(code), sizeof ui.msg2);
         else
-            ui_message(MSG_NO_SAMPLE);
+            ui_message(MSG_MISSING(code));
         return;
     }
 }

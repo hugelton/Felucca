@@ -1,26 +1,27 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * The design (the device clock driven by the audio the worklet asks for, the exports below, the saved
- * flash handed back before boot) follows X0X's browser build, web/emu/x0x_web.c of charlesvestal/fm1-x0x
- * (GPL-3.0), a Felucca fork. */
-/* Felucca in the browser: the firmware's sources, as the host tests build them (tests/hostsim.c: libc,
- * engines, voices, FX, sequencer; then the UI, main.c, storage and projects, in src/felucca.c's order),
- * compiled to WebAssembly and run in an AudioWorklet against a simulated FM-1:
- *   - the device clock: TIMER4 ticks (24 MHz) and fm1_ms advance with the audio the worklet asks for; the
- *     audio ISR (audio.c fm1_alnk0_irq, the real one) renders each I2S half (HALF_FRAMES) as the DMA would
- *     ask for it, and the main loop (main.c's, below in web_frame) runs every 15 ms, with ui_input on every
- *     millisecond in between as main.c's wait loop calls it;
- *   - the panel: buttons and encoders by their printed labels (panel.c's table maps them to the matrix),
- *     the keys as fm1_in.notes, the LEDs read back from fm1_led / fm1_led_dim through the key matrix;
+ * The design (the device clock driven by the audio asked for, the API below, the saved flash handed back before boot)
+ * follows X0X's browser build, web/emu/x0x_web.c of charlesvestal/fm1-x0x (GPL-3.0), a Felucca fork. */
+/* The host: Felucca on a computer (felucca_host.h is its API). The firmware's sources (platforms/host/firmware.c: libc,
+ * engines, voices, FX, sequencer; then the UI, main.c, storage and projects, in firmware/src/felucca.c's order) against
+ * a simulated FM-1:
+ *   - the device clock: TIMER4 ticks (24 MHz) and fm1_ms advance with the audio asked for (fh_render); the audio ISR
+ *     (audio.c fm1_alnk0_irq, the real one) renders each I2S half (HALF_FRAMES) as the DMA would ask for it, and the
+ *     main loop (main.c's, below in fh_frame) runs every 15 ms, with ui_input on every millisecond in between as
+ *     main.c's wait loop calls it;
+ *   - the panel: buttons and encoders by their printed labels (panel.c's table maps them to the matrix), the keys as
+ *     fm1_in.notes, the LEDs read back from fm1_led / fm1_led_dim through the key matrix;
  *   - the screen: lcd_fill / lcd_blit into a 240 x 240 RGB565 frame (the panel's byte order);
- *   - the flash: a 1 MiB NOR image behind storage.c's hooks (settings, projects, user presets, the user
- *     sample slots read through it as XIP); the page keeps its storage sectors and gives them back at boot.
- * Not here: USB (MIDI, audio, the editor, updates), TRS MIDI, the serial console, the battery (full), the
- * crash / UBOOT paths. Nothing of the firmware changes for this file.
- *   web/emu/build.sh  ->  build/emu/{felucca.wasm, worklet.js, index.html} */
+ *   - the flash: a 1 MiB NOR image behind storage.c's hooks (settings, projects, user presets, the user sample slots
+ *     read through it as XIP); the platform keeps it and gives it back at boot;
+ *   - plugin engines (firmware/src/plugin.c), handed in by the platform before boot (platforms/common/plugins.c).
+ * Not here: USB (MIDI out, audio, the editor, updates), TRS MIDI, the serial console, the battery (full), the crash /
+ * UBOOT paths. The firmware knows it runs here by FELUCCA_HOST (core.h: the FM-1's plugin slots are not built).
+ * Every host platform builds this file: platforms/web (WebAssembly), platforms/sdl, platforms/libretro, and the
+ * checks (platforms/web/native_check.c). */
 #include <stdint.h>
 
-#define FELUCCA_WEB 1
+#define FELUCCA_HOST 1
 #ifndef FELUCCA_CDC
 #define FELUCCA_CDC 1                    /* as src/felucca.c: MENU > USB SERIAL is there (nothing behind it) */
 #endif
@@ -28,27 +29,33 @@
 #define FELUCCA_OTA 0
 #define FELUCCA_UAC 0
 #define FELUCCA_UART 0
+#ifndef FELUCCA_PLUGINS
+#define FELUCCA_PLUGINS 1                /* plugin engines (firmware/src/plugin.c), handed in by the platform */
+#endif
+#ifndef FELUCCA_PLATFORM
+#define FELUCCA_PLATFORM FE_PLATFORM_DESKTOP   /* (fe_host_t.platform: the web build says FE_PLATFORM_WEB) */
+#endif
 #ifndef FELUCCA_VERSION
-#define FELUCCA_VERSION "WEB"
+#define FELUCCA_VERSION "HOST"
 #endif
 
 static uint8_t nor[0x100000];            /* the SPI NOR (erased: 0xFF) */
 #define SMP_USER_XIP(k) ((const uint8_t *)nor + SMP_USER_BASE + (k) * SMP_USER_SIZE)   /* eng_sample.c */
-#define main hostsim_main
-#include "../../tests/hostsim.c"
-#undef main
+#include "felucca_host.h"
+#include "firmware.c"
+#include "tracks.c"
 
 /* ------------------------------------------------------------ the clock --- */
 #define FM1_TICKS_PER_US 24u             /* TIMER4: 24 MHz */
-static uint32_t web_ticks;
-static uint32_t fm1_ticks(void) { return web_ticks; }
+static uint32_t fh_ticks;
+static uint32_t fm1_ticks(void) { return fh_ticks; }
 
 /* ------------------------------------------------------ audio (ALNK0) --- */
-static uint32_t web_half;                /* the half the next render fills */
+static uint32_t fh_half;                /* the half the next render fills */
 #define FM1_AUDIO_HALF 1u
 static uint8_t fm1_audio_pending(void) { return FM1_AUDIO_HALF; }
 static void fm1_audio_ack_aux(uint8_t p) { (void)p; }
-static uint32_t fm1_audio_free_half(void) { return web_half; }
+static uint32_t fm1_audio_free_half(void) { return fh_half; }
 static void fm1_audio_ack_half(void) {}
 static void fm1_audio_init(int32_t *buf, uint32_t words, void (*isr)(void), uint32_t prio)
 { (void)buf; (void)words; (void)isr; (void)prio; }
@@ -67,59 +74,59 @@ static const int8_t FM1_KEYMAP[6][FM1_NCOL] = {      /* as bsp/boards/fm1/fm1_in
     {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 };
 static uint8_t fm1_led[FM1_NCOL], fm1_led_dim[FM1_NCOL], fm1_led_breath[FM1_NCOL], fm1_led_mid[FM1_NCOL];
-static uint32_t web_dim_lo;
-static void fm1_led_dim_level(uint32_t lo) { web_dim_lo = lo; }
+static uint32_t fh_dim_lo;
+static void fm1_led_dim_level(uint32_t lo) { fh_dim_lo = lo; }
 /* the power-on LED sweep (bsp/boards/fm1/fm1_input.h fm1_led_anim_start, the picture bsp/boards/fm1/fm1_led_anim.h): its frame from the
- * clock (a scan frame 1.1 ms), the page draws each LED's level (web_anim_levels); at its end, or on a key or a button
+ * clock (a scan frame 1.1 ms), the page draws each LED's level (fh_anim_levels); at its end, or on a key or a button
  * down, the last picture (the glow everywhere, or dark) and the UI's LEDs from the next frame, as the scan does */
 #include "../../firmware/bsp/boards/fm1/fm1_led_anim.h"
-static uint32_t web_anim_t0, web_anim_glow, web_anim_run, web_anim_idle;   /* (idle: 1.2's idle animation, MENU >
+static uint32_t fh_anim_t0, fh_anim_glow, fh_anim_run, fh_anim_idle;   /* (idle: 1.2's idle animation, MENU >
                                                                               * ANIM IDLE: fm1_idle_level, endless) */
-static uint32_t web_anim_frame(void) { return (web_ticks - web_anim_t0) / (1100u * FM1_TICKS_PER_US); }
+static uint32_t fh_anim_frame(void) { return (fh_ticks - fh_anim_t0) / (1100u * FM1_TICKS_PER_US); }
 static void fm1_led_anim_start(uint32_t glow)
 {
-    web_anim_idle = 0;
+    fh_anim_idle = 0;
     memset(fm1_led, 0, sizeof fm1_led);
     memset(fm1_led_dim, 0, sizeof fm1_led_dim);
     memset(fm1_led_breath, 0, sizeof fm1_led_breath);
     memset(fm1_led_mid, 0, sizeof fm1_led_mid);
-    web_anim_t0 = web_ticks;
-    web_anim_glow = glow != 0u;
-    web_anim_run = 1;
+    fh_anim_t0 = fh_ticks;
+    fh_anim_glow = glow != 0u;
+    fh_anim_run = 1;
 }
 static int fm1_led_anim_on(void)
 {
-    if (web_anim_run && web_anim_idle && (fm1_in.notes || fm1_in.buttons))
-        web_anim_run = 0;                       /* (the idle animation: ended, the UI's LEDs from now) */
-    if (web_anim_run && !web_anim_idle && (web_anim_frame() >= FM1_ANIM_FRAMES || fm1_in.notes || fm1_in.buttons)) {
+    if (fh_anim_run && fh_anim_idle && (fm1_in.notes || fm1_in.buttons))
+        fh_anim_run = 0;                       /* (the idle animation: ended, the UI's LEDs from now) */
+    if (fh_anim_run && !fh_anim_idle && (fh_anim_frame() >= FM1_ANIM_FRAMES || fm1_in.notes || fm1_in.buttons)) {
         uint32_t c, r;
-        web_anim_run = 0;
+        fh_anim_run = 0;
         for (c = 0; c < FM1_NCOL; c++)
             for (r = 1; r < 5u; r++)
-                if (web_anim_glow && FM1_KEYMAP[r][c] >= 0)
+                if (fh_anim_glow && FM1_KEYMAP[r][c] >= 0)
                     fm1_led_dim[c] |= (uint8_t)(1u << r);
     }
-    return (int)web_anim_run;
+    return (int)fh_anim_run;
 }
 static void fm1_led_idle_start(uint32_t glow)
 {
     fm1_led_anim_start(glow);
-    web_anim_idle = 1;
+    fh_anim_idle = 1;
 }
-static int fm1_led_idle_on(void) { return fm1_led_anim_on() && web_anim_idle; }
-static void fm1_led_anim_stop(void) { web_anim_run = 0; }
-static uint32_t web_pressed, web_released, web_notes_pressed;
-static int32_t web_enc_steps[7];
+static int fm1_led_idle_on(void) { return fm1_led_anim_on() && fh_anim_idle; }
+static void fm1_led_anim_stop(void) { fh_anim_run = 0; }
+static uint32_t fh_pressed, fh_released, fh_notes_pressed;
+static int32_t fh_enc_steps[7];
 static uint32_t fm1_input_edges(uint32_t *released)
 {
-    uint32_t p = web_pressed;
+    uint32_t p = fh_pressed;
     if (released)
-        *released = web_released;
-    web_pressed = web_released = 0;
+        *released = fh_released;
+    fh_pressed = fh_released = 0;
     return p;
 }
-static uint32_t fm1_input_note_edges(void) { uint32_t n = web_notes_pressed; web_notes_pressed = 0; return n; }
-static int32_t fm1_enc_take(uint32_t e) { int32_t s = web_enc_steps[e % 7u]; web_enc_steps[e % 7u] = 0; return s; }
+static uint32_t fm1_input_note_edges(void) { uint32_t n = fh_notes_pressed; fh_notes_pressed = 0; return n; }
+static int32_t fm1_enc_take(uint32_t e) { int32_t s = fh_enc_steps[e % 7u]; fh_enc_steps[e % 7u] = 0; return s; }
 static void fm1_input_init(void) {}
 static void fm1_input_tick(void) {}
 static void fm1_wdt_feed(void) {}
@@ -127,31 +134,31 @@ static void fm1_irq_off(void) {}
 static void fm1_irq_on(void) {}
 
 /* ----------------------------------------------------------- the screen --- */
-static uint16_t web_fb[240 * 240];       /* RGB565 as the panel gets it (high byte first) */
-static uint32_t web_draws;
+static uint16_t fh_fb[240 * 240];       /* RGB565 as the panel gets it (high byte first) */
+static uint32_t fh_draws;
 static void lcd_fill(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t c)
 {
     uint32_t i, j;
     uint16_t sw = (uint16_t)((c >> 8) | (c << 8));
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++)
-            web_fb[(y + j) * 240u + x + i] = sw;
-    web_draws++;
+            fh_fb[(y + j) * 240u + x + i] = sw;
+    fh_draws++;
 }
 static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *p)
 {
     uint32_t i, j;
     for (j = 0; j < h && y + j < 240u; j++)
         for (i = 0; i < w && x + i < 240u; i++)
-            web_fb[(y + j) * 240u + x + i] = p[j * w + i];
-    web_draws++;
+            fh_fb[(y + j) * 240u + x + i] = p[j * w + i];
+    fh_draws++;
 }
 static void lcd_sync(void) {}
 static void lcd_power(uint32_t s)              /* MENU > SCREEN OFF (lcd.c): off, the page dark; on: redrawn before */
 {
     if (!s) {
-        memset(web_fb, 0, sizeof web_fb);
-        web_draws++;
+        memset(fh_fb, 0, sizeof fh_fb);
+        fh_draws++;
     }
 }
 static void lcd_wake_now(void) {}
@@ -169,7 +176,7 @@ static void lcd_init(void) {}
 #include "../../firmware/src/ui_layer.c"
 
 /* ------------------------------------------------------------ the flash --- */
-static uint32_t web_flash_writes;
+static uint32_t fh_nwrites;
 static uint8_t flash_ok;
 static int st_read(uint32_t off, void *dst, uint32_t n)
 {
@@ -183,7 +190,7 @@ static int st_erase(uint32_t off)
     if (off >= sizeof nor || 4096u > sizeof nor - off)
         return -8;
     memset(nor + (off & ~4095u), 0xFF, 4096);
-    web_flash_writes++;
+    fh_nwrites++;
     return 0;
 }
 static int st_prog(uint32_t off, const void *src, uint32_t n)       /* NOR: a write only clears bits */
@@ -194,7 +201,7 @@ static int st_prog(uint32_t off, const void *src, uint32_t n)       /* NOR: a wr
         return -8;
     for (i = 0; i < n; i++)
         nor[off + i] &= s[i];
-    web_flash_writes++;
+    fh_nwrites++;
     return 0;
 }
 static uint32_t irq_save(void) { return 0; }
@@ -217,9 +224,9 @@ static fm1_crash_t fm1_crash;                     /* (none: main.c boot_leds run
 static struct { uint8_t p3_rst, wdt_con; uint32_t rst_src; } fm1_boot;
 uint32_t _data_start[1], _data_end[1], _data_load[1], _bss_start[1], _bss_end[1];
 uint32_t _pool_start[1], _pool_end[1], _rt_start[1], _rt_end[1], _rt_load[1];
-static uint32_t web_master_adc = 700;   /* MASTER, 0..1023 as the ADC reads it */
+static uint32_t fh_master_adc = 700;   /* MASTER, 0..1023 as the ADC reads it */
 enum { FM1_ADC_BATT = 3, FM1_ADC_MASTER = 4 };
-static int32_t fm1_adc_read(uint32_t ch) { return ch == FM1_ADC_MASTER ? (int32_t)web_master_adc : 620; }
+static int32_t fm1_adc_read(uint32_t ch) { return ch == FM1_ADC_MASTER ? (int32_t)fh_master_adc : 620; }
 static void fm1_adc_init(void) {}
 static void fm1_timer5_ack(void) {}
 static void fm1_timer5_start(void (*isr)(void), uint32_t prio) { (void)isr; (void)prio; }
@@ -258,10 +265,10 @@ static void cdc_task(void) {}
 #undef usb_detach
 
 /* --------------------------------------------------------- the device --- */
-static uint32_t web_booted, web_boot_ms, web_last_frame;
+static uint32_t fh_on, fh_boot_ms, fh_last_frame;
 
 /* main.c fm1_main's boot, up to the main loop (no USB, no UART, no panel setup) */
-static void web_power_on(void)
+static void fh_power_on(void)
 {
     persist_boot();
     settings_init();
@@ -279,12 +286,12 @@ static void web_power_on(void)
     audio_init();
     boot_leds();                          /* main.c: the power-on LED sweep, from the scan's start */
     autosave_boot(boot_clean);            /* main.c: the last session's music (1.2, project.c) */
-    web_boot_ms = fm1_ms + 430u;         /* main.c: 30 + 400 ms before the first frame */
-    web_booted = 1;
+    fh_boot_ms = fm1_ms + 430u;         /* main.c: 30 + 400 ms before the first frame */
+    fh_on = 1;
 }
 
 /* one pass of main.c fm1_main's loop (what the browser has: no USB, editor, UBOOT, console) */
-static void web_frame(void)
+static void fh_frame(void)
 {
     int32_t b = fm1_adc_read(FM1_ADC_BATT);
     if (b > 0)
@@ -298,59 +305,58 @@ static void web_frame(void)
     ui_draw();
 }
 
-/* output ring, stereo float, filled by web_ms, drained by web_render */
+/* output ring, stereo float, filled by fh_ms, drained by fh_render */
 #define RING 4096u
 static float ring[RING * 2];
-static uint32_t ring_w, ring_r, web_samples_due;
+static uint32_t ring_w, ring_r, fh_samples_due;
 
 /* one millisecond of the device: the clock, the audio halves due by now, the main loop */
-static void web_ms(void)
+static void fh_ms(void)
 {
     fm1_ms++;
-    web_ticks += 1000u * FM1_TICKS_PER_US;
-    web_samples_due += FS;
-    while (web_samples_due >= 1000u * HALF_FRAMES) {      /* an I2S half: the audio ISR renders it */
+    fh_ticks += 1000u * FM1_TICKS_PER_US;
+    fh_samples_due += FS;
+    while (fh_samples_due >= 1000u * HALF_FRAMES) {      /* an I2S half: the audio ISR renders it */
         uint32_t k;
-        const int32_t *o = &abuf[web_half * HALF_WORDS];
-        web_samples_due -= 1000u * HALF_FRAMES;
+        const int32_t *o = &abuf[fh_half * HALF_WORDS];
+        fh_samples_due -= 1000u * HALF_FRAMES;
         fm1_alnk0_irq();
         for (k = 0; k < HALF_FRAMES; k++) {
             uint32_t i = (ring_w++ % RING) * 2u;
             ring[i] = (float)o[2u * k] / 8388608.0f;
             ring[i + 1] = (float)o[2u * k + 1u] / 8388608.0f;
         }
-        web_half ^= 1u;
+        fh_half ^= 1u;
     }
-    if (!web_booted || (int32_t)(fm1_ms - web_boot_ms) < 0)
+    if (!fh_on || (int32_t)(fm1_ms - fh_boot_ms) < 0)
         return;
-    if (web_boot_ms) {                                    /* main.c: the splash goes, the loop starts */
-        web_boot_ms = 0;
+    if (fh_boot_ms) {                                    /* main.c: the splash goes, the loop starts */
+        fh_boot_ms = 0;
         kb_boot_hold = 0;
         lcd_fill(0, 0, 240, 240, T_BG);
-        web_last_frame = fm1_ms - 15u;
+        fh_last_frame = fm1_ms - 15u;
     }
-    if (fm1_ms - web_last_frame >= 15u) {                /* main.c: a frame, then ui_input until 15 ms are over */
-        web_last_frame = fm1_ms;
-        web_frame();
+    if (fm1_ms - fh_last_frame >= 15u) {                /* main.c: a frame, then ui_input until 15 ms are over */
+        fh_last_frame = fm1_ms;
+        fh_frame();
     } else {
         ui_input();                                       /* main.c's wait loop */
     }
 }
 
-#define EXPORT __attribute__((used, visibility("default")))
 #undef __attribute__
 
 static float out_l[1024], out_r[1024];
-EXPORT float *web_out_l(void) { return out_l; }
-EXPORT float *web_out_r(void) { return out_r; }
+FH_API float *fh_out_l(void) { return out_l; }
+FH_API float *fh_out_r(void) { return out_r; }
 /* n frames (<= 1024) into out_l / out_r: the device runs until they exist */
-EXPORT void web_render(uint32_t n)
+FH_API void fh_render(uint32_t n)
 {
     uint32_t k;
     if (n > 1024u)
         n = 1024u;
     while (ring_w - ring_r < n)
-        web_ms();
+        fh_ms();
     for (k = 0; k < n; k++) {
         uint32_t i = (ring_r++ % RING) * 2u;
         out_l[k] = ring[i];
@@ -358,47 +364,53 @@ EXPORT void web_render(uint32_t n)
     }
 }
 
-/* the flash: erased, then the page's saved sectors (web_nor), then boot */
-EXPORT uint8_t *web_nor(void) { return nor; }
-EXPORT uint32_t web_nor_size(void) { return sizeof nor; }
-EXPORT void web_nor_erase(void) { memset(nor, 0xFF, sizeof nor); }
-EXPORT uint32_t web_flash_writes_count(void) { return web_flash_writes; }
-EXPORT void web_boot(void)
+/* the flash: erased, then the page's saved sectors (fh_nor), then boot */
+FH_API uint8_t *fh_nor(void) { return nor; }
+FH_API uint32_t fh_nor_size(void) { return sizeof nor; }
+FH_API void fh_nor_erase(void) { memset(nor, 0xFF, sizeof nor); }
+FH_API uint32_t fh_flash_writes(void) { return fh_nwrites; }
+FH_API void fh_boot(void)
 {
-    if (!web_booted)
-        web_power_on();
+    if (!fh_on)
+        fh_power_on();
 }
+
+/* plugin engines (firmware/src/plugin.c), before fh_boot: what to give a plugin's felucca_plugin(), then
+ * the descriptor it returned, with the number a plugin of its own (FE_NEW) plays as (the platform keeps one for each
+ * plugin id). fh_plugin_add: 0 taken, else plg_add's reason (4: the firmware has booted) */
+FH_API const void *fh_plugin_host(void) { return &PLG_HOST; }
+FH_API uint32_t fh_plugin_add(const void *d, uint32_t no) { return fh_on ? 4u : (uint32_t)plg_add((const fe_plugin_t *)d, no); }
 
 /* input, by the printed labels: buttons bit b = B_FX .. B_OCTUP (panel.c), keys bit k = key k (F3 .. G5),
  * encoders by role (EN_SELECT .. EN_K4), MASTER 0..1023 */
-static uint32_t web_btn_labels, web_key_mask;
-EXPORT void web_buttons(uint32_t labels)
+static uint32_t fh_btn_labels, fh_key_mask;
+FH_API void fh_buttons(uint32_t labels)
 {
     uint32_t m = 0, b, old = fm1_in.buttons;
-    web_btn_labels = labels;
+    fh_btn_labels = labels;
     for (b = 0; b < NB; b++)
         if ((labels >> b) & 1u)
             m |= 1u << panel.btn[b];
-    web_pressed |= m & ~old;
-    web_released |= old & ~m;
+    fh_pressed |= m & ~old;
+    fh_released |= old & ~m;
     fm1_in.buttons = m;
 }
-EXPORT void web_keys(uint32_t mask)
+FH_API void fh_keys(uint32_t mask)
 {
     uint32_t old = fm1_in.notes;
     mask &= (1u << 27) - 1u;
-    web_key_mask = mask;
-    web_notes_pressed |= mask & ~old;
+    fh_key_mask = mask;
+    fh_notes_pressed |= mask & ~old;
     fm1_in.notes = mask;
 }
-EXPORT void web_enc(uint32_t role, int32_t n)
+FH_API void fh_enc(uint32_t role, int32_t n)
 {
     if (role < NE)
-        web_enc_steps[panel.enc[role] % 7u] += n * panel.dir[role];
+        fh_enc_steps[panel.enc[role] % 7u] += n * panel.dir[role];
 }
-EXPORT void web_master(uint32_t v) { web_master_adc = v > 1023u ? 1023u : v; }
+FH_API void fh_master(uint32_t v) { fh_master_adc = v > 1023u ? 1023u : v; }
 /* a channel message from Web MIDI, as a USB-MIDI packet arrives (usb.c midi_enqueue): 0 = the ring was full */
-EXPORT uint32_t web_midi(uint32_t status, uint32_t d1, uint32_t d2)
+FH_API uint32_t fh_midi(uint32_t status, uint32_t d1, uint32_t d2)
 {
     if (status < 0x80u || status >= 0xF0u)
         return 1;
@@ -429,37 +441,55 @@ static uint32_t led_keys(const uint8_t *l)
         m |= led_on(l, 14u + k) << k;
     return m;
 }
-EXPORT uint32_t web_lit_buttons(void)
+FH_API uint32_t fh_lit_buttons(void)
 {
     return led_buttons(fm1_led) | ((fm1_led[LED_PLAY_GREEN >> 3] >> (LED_PLAY_GREEN & 7u)) & 1u) << 14;
 }
-EXPORT uint32_t web_lit_keys(void) { return led_keys(fm1_led); }
-EXPORT uint32_t web_dim_buttons(void) { return led_buttons(fm1_led_dim); }
-EXPORT uint32_t web_dim_keys(void) { return led_keys(fm1_led_dim); }
-EXPORT uint32_t web_dim_level(void) { return web_dim_lo; }
-EXPORT uint32_t web_breath_buttons(void) { return led_buttons(fm1_led_breath); }   /* #119: dark .. ~60 % of lit */
-EXPORT uint32_t web_breath_keys(void) { return led_keys(fm1_led_breath); }
-EXPORT uint32_t web_mid_keys(void) { return led_keys(fm1_led_mid); }   /* the DRUM grid's beats: a steady mid level */
+FH_API uint32_t fh_lit_keys(void) { return led_keys(fm1_led); }
+FH_API uint32_t fh_dim_buttons(void) { return led_buttons(fm1_led_dim); }
+FH_API uint32_t fh_dim_keys(void) { return led_keys(fm1_led_dim); }
+FH_API uint32_t fh_dim_level(void) { return fh_dim_lo; }
+FH_API uint32_t fh_breath_buttons(void) { return led_buttons(fm1_led_breath); }   /* #119: dark .. ~60 % of lit */
+FH_API uint32_t fh_breath_keys(void) { return led_keys(fm1_led_breath); }
+FH_API uint32_t fh_mid_keys(void) { return led_keys(fm1_led_mid); }   /* the DRUM grid's beats: a steady mid level */
 /* the power-on sweep (or 1.2's idle animation) running: each LED's level now (bsp/boards/fm1/fm1_led_anim.h: 0..64 /64 of lit, | 0x80 the glow under
  * it), 0..13 the buttons by label, 14..40 the keys F3..G5; 0 when it is not */
-EXPORT uint8_t *web_anim_levels(void)
+FH_API uint8_t *fh_anim_levels(void)
 {
     static uint8_t lv[FM1_ANIM_NBTN + FM1_ANIM_NKEY];
-    uint32_t f = web_anim_frame(), i;
+    uint32_t f = fh_anim_frame(), i;
     if (!fm1_led_anim_on())
         return 0;
     for (i = 0; i < FM1_ANIM_NBTN + FM1_ANIM_NKEY; i++)
-        lv[i] = (uint8_t)(web_anim_idle ? fm1_idle_level : fm1_anim_level)(f, i < FM1_ANIM_NBTN ? (i < NB ? panel.btn[i] : i) : i,
-                                                                          web_anim_glow);
+        lv[i] = (uint8_t)(fh_anim_idle ? fm1_idle_level : fm1_anim_level)(f, i < FM1_ANIM_NBTN ? (i < NB ? panel.btn[i] : i) : i,
+                                                                          fh_anim_glow);
     return lv;
 }
 
-/* for the test and the bench (web/emu/emu_test.mjs), a heavy song straight into the tracks (as hostsim's
+/* for the test and the bench (platforms/web/emu_test.mjs), a heavy song straight into the tracks (as hostsim's
  * renders set them): T1 FM6 PAD, T2 PHYS DRONE STRING (SYMP), T3 GRAIN CLOUD PAD, 4-note chords on all 16
  * steps, held; T4 DRUM, kick snare and hats. PLAY is the page's (or the test's) to press */
-EXPORT void web_test_heavy(void)
+static void fh_test_song(const uint8_t ENG[3][2]);
+FH_API void fh_test_heavy(void)
 {
     static const uint8_t ENG[3][2] = {{12, 4}, {ENGI_PHYS, 7}, {8, 0}};
+    fh_test_song(ENG);
+}
+/* engine e's presets p, p + 1, p + 2 (wrapping) on T1..T3 in the heavy song's chords, T4 its drums
+ * (platforms/sdl --engines-check: an engine and its plugin alike); returns the engine's number of presets */
+FH_API uint32_t fh_test_engine(uint32_t e, uint32_t p)
+{
+    uint8_t eng[3][2];
+    uint32_t n = ENGINES[e % NENGINES]->npresets, k;
+    for (k = 0; k < 3u; k++) {
+        eng[k][0] = (uint8_t)(e % NENGINES);
+        eng[k][1] = (uint8_t)(n ? (p + k) % n : 0u);
+    }
+    fh_test_song((const uint8_t(*)[2])eng);
+    return n;
+}
+static void fh_test_song(const uint8_t ENG[3][2])
+{
     static const uint8_t CH[4][4] = {{48, 55, 60, 64}, {45, 52, 57, 60}, {41, 48, 53, 57}, {43, 50, 55, 59}};
     uint32_t p, i;
     for (p = 0; p < 3u; p++) {
@@ -488,10 +518,14 @@ EXPORT void web_test_heavy(void)
     ui.force = 1;
 }
 
-EXPORT uint32_t web_test_user_preset(uint32_t i) { return (uint32_t)up_used(i); }
+FH_API uint32_t fh_test_user_preset(uint32_t i) { return (uint32_t)up_used(i); }
 
-EXPORT uint16_t *web_screen(void) { return web_fb; }
-EXPORT uint32_t web_screen_draws(void) { return web_draws; }
-EXPORT uint32_t web_now_ms(void) { return fm1_ms; }
-EXPORT uint32_t web_playing(void) { return song.playing; }
-EXPORT uint32_t web_sample_rate(void) { return FS; }
+FH_API uint16_t *fh_screen(void) { return fh_fb; }
+FH_API uint32_t fh_screen_draws(void) { return fh_draws; }
+FH_API uint32_t fh_now_ms(void) { return fm1_ms; }
+FH_API uint32_t fh_playing(void) { return song.playing; }
+FH_API uint32_t fh_sample_rate(void) { return FS; }
+FH_API uint32_t fh_booted(void) { return fh_on; }
+FH_API uint32_t fh_held_buttons(void) { return fh_btn_labels; }
+FH_API uint32_t fh_held_keys(void) { return fh_key_mask; }
+FH_API uint32_t fh_master_level(void) { return fh_master_adc; }

@@ -9,6 +9,8 @@
  * POOL : big zero-initialised buffers (FX lines, canvases, the parts' engine memory, the main loop's work
  *        buffers), section .pool. The same SRAM: the RAM / POOL boundary only splits the budget (1.5: 96 / 336
  *        KiB -> 72 / 360 KiB); tools/build.py reads both lengths from here
+ * PLUGRAM: the plugin engines' .data / .bss (src/plugin_fm1.c; Felucca-Engines felucca_plugin.h FE_FM1_SLOT_RAM: a
+ *        4 KiB block a slot, at these fixed addresses), the top of what was POOL's (1.9: 360 -> 352 KiB)
  * STACKS with 256-byte guard bands; NOINIT survives resets and UBOOT entry.
  * 0x01C7FD50.. is reserved: boot_info, boot-state mailbox, vector table. */
 MEMORY
@@ -16,7 +18,8 @@ MEMORY
     XIP    (rx)  : ORIGIN = 0x02000120, LENGTH = 0x8DFBC
     RAMTEXT (rwx): ORIGIN = 0x01C00000, LENGTH = 0x6000
     RAM    (rwx) : ORIGIN = 0x01C08000, LENGTH = 72K
-    POOL   (rw)  : ORIGIN = 0x01C1A000, LENGTH = 0x5A000
+    POOL   (rw)  : ORIGIN = 0x01C1A000, LENGTH = 0x58000
+    PLUGRAM (rw) : ORIGIN = 0x01C72000, LENGTH = 0x2000
     NOINIT (rw)  : ORIGIN = 0x01C7C000, LENGTH = 0x3D50
 }
 SECTIONS

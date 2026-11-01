@@ -432,7 +432,7 @@ static int page_visible(uint32_t i)
     if (PAGES[i].scope == SC_TRACK && PAGES[i].id[0] >= P_LN0 && PAGES[i].id[0] <= P_LN7)
         return TSEL->eng_req % NENGINES == ENGI_DRUM;
     if (PAGES[i].id[0] == P_FTYPE)                    /* FILTER (1.5, #104): ANALOG's */
-        return ENGINES[TSEL->eng_req % NENGINES] == &ENG_ANALOG;
+        return TSEL->eng_req % NENGINES == ENGI_ANALOG;
     if (PAGES[i].graph >= GR_FMOP && PAGES[i].graph <= GR_FMENV)
         return TSEL->eng_req % NENGINES == ENGI_FM6;
 #if FELUCCA_SLICE
@@ -473,6 +473,12 @@ static void ui_message(const char *s) { ui_say(s, ""); }
 /* a missing sample (ui_input.c sample_notice): NO SAMPLE (SAMPLE NOT FOUND, the SLICES page's, is 4 px too wide
  * for the header's 130 px after the icon) */
 #define MSG_NO_SAMPLE MSG_NOFILE "NO SAMPLE"
+#if FELUCCA_PLUGINS
+#define MSG_NO_PLUGIN MSG_NOFILE "NO PLUGIN"     /* (engines.c snd_missing: code 128 and up) */
+#define MSG_MISSING(code) ((code) >= 128u ? MSG_NO_PLUGIN : MSG_NO_SAMPLE)
+#else
+#define MSG_MISSING(code) MSG_NO_SAMPLE
+#endif
 
 static int chain_busy(void) { return chain.running || chain.armed; }
 /* Main loop only, with interrupts enabled. PLAY may be consumed between reads;
@@ -1521,7 +1527,7 @@ static void select_engine(uint32_t e)
 static uint32_t preset_all_pos(uint32_t *total)          /* list index of the selected track's preset */
 {
     uint32_t n = 0, cur = 0, e, r;
-    for (r = 0; r < NENG_SHOWN; r++) {                  /* (engines.c ENGINE_ORDER) */
+    for (r = 0; r < eng_nshown(); r++) {                  /* (engines.c ENGINE_ORDER) */
         const engine_t *en = ENGINES[e = eng_vis(r)];
         if (e == TSEL->eng_req)
             cur = n + preset_rank(en, preset_orig(en, TSEL->preset % (en->npresets ? en->npresets : 1u)));
@@ -1537,9 +1543,9 @@ static uint32_t preset_all_pos(uint32_t *total)          /* list index of the se
 static uint32_t preset_all_at(uint32_t n, uint32_t *k)
 {
     uint32_t e = 0, i, r;
-    for (r = 0; r < NENG_SHOWN && n >= preset_shown(eng_vis(r)); r++)
+    for (r = 0; r < eng_nshown() && n >= preset_shown(eng_vis(r)); r++)
         n -= preset_shown(eng_vis(r));
-    if (r == NENG_SHOWN) {
+    if (r == eng_nshown()) {
         *k = up_nth(n);
         return NENGINES;
     }

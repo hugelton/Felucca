@@ -24,8 +24,9 @@ Pull requests are welcome, including AI-assisted ones, with the same bar for all
 
 - keep it small and focused on one thing;
 - make sure you understand the change and can explain it;
-- test it on a real FM-1;
-- run `tests/run_tests.sh` (see [BUILDING.md](BUILDING.md));
+- test it on a real FM-1 (a change only to a host platform under `platforms/`: on that platform);
+- run `tests/run_tests.sh` (see [BUILDING.md](BUILDING.md)); CI runs the tests that need no FM-1 toolchain on every
+  pull request;
 - new files carry the GPL-3.0-only SPDX header.
 
 By contributing you agree that your contribution is licensed under GPL-3.0-only.
@@ -35,3 +36,8 @@ The ANALOG, LOFI, TRIO, WHEEL, NOISE and PHASE engines and the code they share (
 pull requests to that repository.
 
 The web editor and installer live in [Felucca-WebApp](https://github.com/hugelton/Felucca-WebApp).
+
+A new sound engine does not need a pull request here: make it a plugin, in a repository of your own and under the
+licence you choose ([docs/PLUGINS.md](docs/PLUGINS.md)). To reserve its id, add it to Felucca-Engines'
+`docs/PLUGIN_IDS.md` by a pull request there. A new platform: see [docs/PORTING.md](docs/PORTING.md), and open an issue
+first so that the work can be shared.

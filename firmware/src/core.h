@@ -16,6 +16,15 @@
 #ifndef FELUCCA_SLICE
 #define FELUCCA_SLICE 1          /* the SLICE engine (eng_slice.c), engine 13; FELUCCA_SLICE=0 builds without it */
 #endif
+#ifndef FELUCCA_PLUGINS
+#define FELUCCA_PLUGINS 0        /* plugin engines (plugin.c): felucca.c (the FM-1, from 1.9) and the host set 1; the host tests
+                                  * build without them unless they ask */
+#endif
+#if FELUCCA_PLUGINS && !defined(FELUCCA_HOST)
+#define FELUCCA_PLUGINS_FM1 1    /* the FM-1's own: plugin_fm1.c, editor_plugin.c (with FELUCCA_FLASH) */
+#else
+#define FELUCCA_PLUGINS_FM1 0
+#endif
 #ifndef FELUCCA_FM4
 #define FELUCCA_FM4 0            /* the DIGITAL engine (eng_digital.c, four-operator FM): kept in the tree, not built
                                   * by default; replaced by FM6, its sounds convert (fm4_convert.c) */
@@ -35,12 +44,27 @@
 #if FELUCCA_ADPCM && !FELUCCA_SLICE
 #error "FELUCCA_ADPCM needs FELUCCA_SLICE (ADPCM is engine 14, after SLICE)"
 #endif
-#define NENGINES (13 + FELUCCA_SLICE + FELUCCA_ADPCM)   /* SLICE (13), then ADPCM (14): the other engines keep their
-                                                         * numbers */
+#define NENG_BUILTIN (13 + FELUCCA_SLICE + FELUCCA_ADPCM)   /* SLICE (13), then ADPCM (14): the other engines keep
+                                                             * their numbers */
+#if FELUCCA_PLUGINS
+#define ENGI_PLUG0 32u           /* the numbers of plugin engines of their own (plugin.c): 32 .. NENGINES - 2; 15 .. 31 stay
+                                  * Felucca's. A number no plugin plays here is ENG_MISSING (a sine) */
+#define NENGINES 96
+#define ENGI_UNKNOWN (NENGINES - 1u)   /* never given to a plugin: a project's track of a plugin this device has never
+                                        * had (its id kept, project.c proj_plugin_*): ENG_MISSING */
+#ifdef FELUCCA_HOST
+#define NPLUG 8u                 /* plugins at a time (a desktop's folder) */
+#else
+#define NPLUG 2u                 /* the FM-1's slots (plugin_fm1.c, felucca_plugin.h FE_FM1_NSLOT) */
+#endif
+#else
+#define NENGINES NENG_BUILTIN
+#endif
 #define ENGI_ADPCM 14u
 #define ENGI_DIGITAL 1u          /* reserved without FELUCCA_FM4: never selectable (eng_ok), its sounds load as FM6 */
-#define NENG_SHOWN (NENGINES - !FELUCCA_FM4)   /* the engines one can pick: PRESETS, the EDIT layer, the editor,
-                                                * in the display order of engines.c ENGINE_ORDER */
+#define NENG_SHOWN (NENG_BUILTIN - !FELUCCA_FM4)   /* Felucca's engines one can pick: PRESETS, the EDIT layer, the
+                                                    * editor, in the display order of engines.c ENGINE_ORDER (with
+                                                    * plugins: eng_nshown, those and the plugins of their own) */
 #define UP_SLOTS 32u             /* user presets (upreset.c) */
 
 /* ------------------------------------------------------- parameters --- */
@@ -116,6 +140,7 @@ static void params_by_count(int16_t *out, const int16_t *in, uint32_t np, const 
 }
 
 /* engine indices the stores name (engines.c ENGINES[]: append-only) */
+#define ENGI_ANALOG 0u
 #define ENGI_PHYS 9u
 #define ENGI_DRUM 10u
 /* PHYS MODEL DRUM (MODEL 4, before 1.0) -> the DRUM engine, its E values in place: {MODEL, TUNE, TONE, DECY,

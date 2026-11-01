@@ -354,6 +354,9 @@ static int ed_flash_stop(void)
 #include "editor_menu.c"
 #include "editor_learn.c"                    /* 1.5: MIDI LEARN's map (cmds 78, 79) */
 #include "editor_palette.c"                  /* 1.6: CUSTOM, the user's palette (cmds 80, 81) */
+#if FELUCCA_PLUGINS_FM1 && FELUCCA_FLASH
+#include "editor_plugin.c"                   /* the plugin engines' slots (cmds 82 .. 86) */
+#endif
 
 /* MOTION's reply: the records of track k as (step, id, v14), a lock's id without its MOTION_LOCK bit (a 7-bit SysEx
  * byte); kinds (1.1: the ops 5..7): then one byte per record, in the same order, 0 automation, 1 lock. The query and
@@ -445,6 +448,9 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
     if (ed_menu_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_learn_handle(cmd, a, na)) { ed_send(); return; }
     if (ed_palette_handle(cmd, a, na)) { ed_send(); return; }
+#if FELUCCA_PLUGINS_FM1 && FELUCCA_FLASH
+    if (ed_plugin_handle(cmd, a, na)) { ed_send(); return; }
+#endif
     switch (cmd) {
     case ED_MOTION: {
         track_t *t = &trk[a[0]]; uint32_t rc = 0;
@@ -466,12 +472,12 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
     }
     case ED_INFO:
         ed_str("FELUCCA " FELUCCA_VERSION, 24);
-        ed_b(NENGINES);
+        ed_b(NENG_BUILTIN);                               /* (Felucca's engines: not yet the plugins') */
         ed_b(P_COUNT);
         ed_b(G_COUNT);
         ed_b(NSTEP);
         ed_b(P_E0);
-        for (i = 0; i < NENGINES; i++)
+        for (i = 0; i < NENG_BUILTIN; i++)
             ed_str(ENGINES[i]->name, 8);
         ed_b(NTRK);                                       /* v3 */
         ed_b(CHAIN_ROWS);                                  /* v6 */
@@ -492,6 +498,9 @@ static void ed_handle(const uint8_t *f, uint32_t n)   /* f: the bytes between F0
         ed_b(0x43); ed_b(1); ed_b(ML_N);   /* 1.5: MIDI LEARN's map (cmds 78, 79; editor_learn.c) */
         ed_b(0x4B); ed_b(1); ed_b(NCOND);   /* 1.5.5: a step's condition (1..11) after its nudge */
         ed_b(0x45); ed_b(1); ed_b(ED_PAL_N);   /* 1.6: CUSTOM, the user's palette: 5 colours (cmds 80, 81; editor_palette.c) */
+#if FELUCCA_PLUGINS_FM1
+        ed_b(0x58); ed_b(1); ed_b(eng_nshown() - NENG_SHOWN);   /* 1.9: plugin engines listed (cmds 82..87, editor_plugin.c) */
+#endif
         break;
     case ED_GET:
     case ED_SET:
