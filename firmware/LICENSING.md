@@ -16,10 +16,10 @@ Every file in this tree that carries an `SPDX-License-Identifier: GPL-3.0-only` 
 - the web pages (installer, editor, the browser emulator `web/emu/`) and their tests: `web/` (not the Fukiai and DotGothic16 fonts, below)
 - the host tests: `tests/`
 
-Three source files are ports and keep the licence of their originals:
-`firmware/src/phys_dsp.c` (DaisySP, MIT), `firmware/src/phys_symp.c` (Rings, MIT) and
-`firmware/src/fm6_core.c` (msfa, Apache-2.0). The firmware built with them is GPL-3.0-only as
-a whole.
+Four source files are ports and keep the licence of their originals:
+`firmware/src/phys_dsp.c` (DaisySP, MIT), `firmware/src/phys_symp.c` (Rings, MIT),
+`firmware/src/fm6_core.c` (msfa, Apache-2.0) and `firmware/src/adpcm_dsp.c` (snes_spc, LGPL-2.1-or-later; built only
+with `FELUCCA_ADPCM=1`, not by default). The firmware built with them is GPL-3.0-only as a whole.
 
 Six engines and the code they share are under the MIT licence, not the GPL. They are
 Hügelton Instruments' own work and live in their own repository, Felucca-Engines
@@ -40,8 +40,10 @@ entry and libc; and the FM-1's board code: keys, LEDs, audio, display, ADC) is f
 Public License 2.0 (`SPDX-License-Identifier: MPL-2.0`, `firmware/bsp/LICENSE`, also
 `LICENSES/MPL-2.0-felucca-bsp.txt`; its authors and origins in `firmware/bsp/NOTICE`). Felucca builds
 `firmware/bsp/chip/` and `firmware/bsp/boards/fm1/` with its own code; `firmware/hal/fm1_uart.h` (GPL-3.0-only) is
-Felucca's own and is used instead of the BSP's. The firmware built with them is GPL-3.0-only as a whole; the MPL
-files stay MPL-2.0, and their source is part of Felucca's complete source as the engines' is.
+Felucca's own and is used instead of the BSP's. AFTERTOUCH's key readings, `firmware/src/keytouch.{c,h}`, are
+MPL-2.0 too: a port of charlesvestal's fm1-base (<https://github.com/charlesvestal/fm1-base>, `lib/sense.c`,
+`lib/touch.c`, MPL-2.0). The firmware built with them is GPL-3.0-only as a whole; the MPL files stay MPL-2.0, and
+their source is part of Felucca's complete source as the engines' is.
 
 You may use, study, change and share Felucca under the GPL. If you distribute Felucca, or
 firmware derived from it, you must also give your recipients its complete corresponding
@@ -68,6 +70,7 @@ All by Hügelton Instruments (Leo Kuroshita), in this tree:
 | Instrument samples (Versilian Studios VSCO-2 Community Edition, VCSL): the SAMPLE sets, also the SLICE engine's PIANO (the PIANO set's middle C) | CC0 1.0 | `assets/samples-cc0/`, provenance in `ATTRIBUTION.txt` there |
 | DaisySP by Electrosmith, Corp and Emilie Gillet (<https://github.com/electro-smith/DaisySP>): the PHYS engine's modal and string models and the resonator, ported to fixed point | MIT | `firmware/src/phys_dsp.c`, `LICENSES/MIT-DaisySP.txt` |
 | Rings by Emilie Gillet (<https://github.com/pichenettes/eurorack>): the PHYS engine's sympathetic strings, ported to fixed point | MIT | `firmware/src/phys_symp.c`, `LICENSES/MIT-Rings.txt` |
+| snes_spc 0.9.0 by Shay Green (<http://www.slack.net/~ant/>): the ADPCM engine's DSP (BRR decoding, Gaussian interpolation, ADSR and GAIN envelopes, noise, echo and FIR), ported to C one voice at a time by ugotworms; `tools/gen_adpcm.py`'s BRR decoder follows its `decode_brr`. Built only with `FELUCCA_ADPCM=1` (off by default) | LGPL-2.1-or-later | `firmware/src/adpcm_dsp.c`, `LICENSES/LGPL-2.1-snes_spc.txt` |
 | msfa by Google Inc. and Pascal Gauthier, from Dexed (<https://github.com/asb2m10/dexed>): the FM6 engine's synthesis, ported to integer C (Dexed itself is GPL-3.0; only msfa is used; the FM6 factory patches are Felucca's own) | Apache-2.0 | `firmware/src/fm6_core.c`, `LICENSES/Apache-2.0-msfa.txt` |
 | klattsch by Tony Gies (<https://github.com/tgies/klattsch>): design reference for the VOICE engine; no code copied. Formant data from Klatt (1980) / Hillenbrand et al. (1995) | MIT (klattsch) | credit only |
 | X0X by charlesvestal (<https://github.com/charlesvestal/fm1-x0x>), a Felucca fork: the design of the browser emulator (the worklet, the device clock driven by its audio, the exports); its files credit it in their headers | GPL-3.0 | `web/emu/` |
