@@ -155,6 +155,9 @@ python3 tools/fm1_plugin.py install firmware/engines/build/fm1/fold.s0.fep      
 build/sdl/felucca --plugins firmware/engines/build/plugins                              # on the desktop
 ```
 
+An optional real Chromium/AudioWorklet smoke gate is documented in
+[Browser smoke test](docs/cloud-testing.md). It runs separately from the existing Node/Wasm tests.
+
 ## Tests
 
 ```
