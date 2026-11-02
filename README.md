@@ -2,6 +2,8 @@
 
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
+![Felucca screens: HOME, tracks, WHEEL, FM6, slices, piano roll, drum grid and song](docs/screens.png)
+
 ## Overview
 
 Felucca is an open-source synthesizer firmware project that began as custom firmware for the M-VAVE FM-1.
