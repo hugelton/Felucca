@@ -744,6 +744,8 @@ static __attribute__((noinline)) void perf_key_remap(void)
             perf_key_press(k, 1);
             continue;
         }
+        if (o < PF_N && ((perf_held >> o) & 1u))      /* (a hold begun before FX LATCH went on: let go of it) */
+            perf_key_press(k, 0);
         kb_fx[k] = (uint8_t)(e + 1u);
         if (o < PF_N && ((perf_latched >> o) & 1u)) {
             perf_latched &= ~PF_BIT(o);

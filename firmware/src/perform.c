@@ -188,10 +188,12 @@ static void perf_press(uint32_t e, int down)
 {
     if (e >= PF_N)
         return;
-    if (perf_latch_on) {                  /* FX LATCH: a press turns it on or off, letting go does nothing */
+    if (perf_latch_on) {                  /* FX LATCH: a press turns it on or off, letting go only ends a hold begun before it */
         if (down) {
             perf_latched ^= PF_BIT(e);
             perf_ord[e] = ++perf_seq;
+        } else {
+            perf_held &= ~PF_BIT(e);      /* (FX LATCH switched on during the hold: the momentary effect ends) */
         }
         return;
     }
