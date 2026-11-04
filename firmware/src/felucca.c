@@ -26,6 +26,12 @@
 #define FELUCCA_UAC_AS_FIRST 1   /* bsp/chip/usb.c (off there by default): the audio streaming interface first in the AC
                                   * collection, as since 1.5.1 (#67: macOS) */
 #endif
+#ifndef FELUCCA_UAC_MIDI_LAST
+#define FELUCCA_UAC_MIDI_LAST 1  /* bsp/chip/usb.c (off there by default): the audio streaming interface right after the
+                                  * audio control one and MIDI last, the collection in that order (#67: macOS 13 .. 15 show
+                                  * no audio device while MIDI is interface 1, whatever the collection's order; MIDI stays
+                                  * in the collection for Linux). It replaces FELUCCA_UAC_AS_FIRST. 0: 1.5.1 .. 1.8's layout */
+#endif
 #ifndef FELUCCA_UAC_TONE
 #define FELUCCA_UAC_TONE 0       /* bench: the USB input sends test triangles instead of the music */
 #endif
