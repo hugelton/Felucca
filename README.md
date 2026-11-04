@@ -12,8 +12,6 @@ The FM-1 is the only supported hardware target. This project does not provide, m
 
 **Newer FM-1 flash: 1.8.2 beta.** Some newer FM-1 units use UC25HQ80 flash (JEDEC ID `0xB36014`). [1.8.2-beta](https://github.com/hugelton/Felucca/releases/tag/v1.8.2-beta) adds recognition for that chip; testing on the revised hardware is still pending. See [issue #320](https://github.com/hugelton/Felucca/issues/320). It is not the stable release.
 
-**Safety notice:** The experimental 1.9.0 preview is withdrawn and must not be installed or used because of a risk of flash corruption. Supported releases do not include a plugin-loading feature.
-
 ## Project resources
 
 - [Web installer](https://hugelton.github.io/Felucca/)
