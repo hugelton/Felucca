@@ -1,5 +1,7 @@
 # Contributing to Felucca
 
+Felucca is maintained for the M-VAVE FM-1 only. Other-device ports and plugin-loading feature requests are outside this project's scope. Contributions may be declined, and no ongoing maintenance is promised.
+
 Thanks for helping! To keep things easy to follow, please use the right place:
 
 | What | Where |
