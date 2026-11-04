@@ -238,7 +238,8 @@ $CC -O2 -DT_CDC=0 -DHALF_FRAMES=$HALF -o "$OUT/uac_test_nocdc" tests/uac_test.c 
 run "USB audio input: descriptors (without CDC), ring and packets, resampler, 48 kHz stream" "$OUT/uac_test_nocdc"
 # USB descriptor layouts (#67): CDC UAC LAYOUT CDC-presented 48K; layout 0 and the console left out = 1.0's bytes
 # (+ the 48 kHz rate with 48K = 1, the default; 48K = 0: byte for byte; + the AC collection's audio streaming
-# interface first, FELUCCA_UAC_AS_FIRST = 1, the default since 1.6)
+# interface first, FELUCCA_UAC_AS_FIRST = 1, the default since 1.6; + MIDI last, FELUCCA_UAC_MIDI_LAST = 1, the default
+# since 1.8.3: the audio streaming interface right after audio control)
 for v in 1.1.0.1.1 1.1.1.1.1 1.1.2.1.1 1.1.3.1.1 1.1.0.0.1 1.1.2.0.1 0.1.0.1.1 1.1.0.1.0 1.1.0.0.0 1.1.2.1.0 0.1.0.1.0 \
          1.0.0.1.1 1.0.1.1.1 1.0.0.0.1 0.0.0.1.1; do
     IFS=. read -r t_cdc t_uac t_lay t_on t_48 <<EOF
@@ -248,13 +249,24 @@ EOF
         tests/usb_desc_test.c
     run "USB descriptors: CDC $t_cdc (presented $t_on), UAC $t_uac (48 kHz $t_48), layout $t_lay" "$OUT/usb_desc_test"
 done
-# FELUCCA_UAC_AS_FIRST=0 (#67): the AC collection of 1.0 .. 1.5 (MIDI first), 1.0's bytes; the parser model of the
-# kernel AppleUSBAudio (macOS <= 15) stops before the audio streaming interface there
+# FELUCCA_UAC_MIDI_LAST=0 (#67): 1.5.1 .. 1.8's layout, MIDI interface 1, the AC collection's audio streaming
+# interface first
+for v in 1.1.0.1.1 1.1.1.1.1 1.1.2.1.1 1.1.0.0.1 0.1.0.1.1 1.1.0.1.0 1.1.0.0.0; do
+    IFS=. read -r t_cdc t_uac t_lay t_on t_48 <<EOF
+$v
+EOF
+    $CC -DT_CDC="$t_cdc" -DT_UAC="$t_uac" -DT_LAYOUT="$t_lay" -DT_ON="$t_on" -DT_48K="$t_48" -DT_ML=0 \
+        -o "$OUT/usb_desc_test" tests/usb_desc_test.c
+    run "USB descriptors (1.5.1 .. 1.8, MIDI interface 1): CDC $t_cdc (presented $t_on), UAC $t_uac (48 kHz $t_48)" \
+        "$OUT/usb_desc_test"
+done
+# FELUCCA_UAC_AS_FIRST=0 and FELUCCA_UAC_MIDI_LAST=0 (#67): the AC collection of 1.0 .. 1.5 (MIDI first), 1.0's bytes;
+# the parser model of the kernel AppleUSBAudio (macOS <= 15) stops before the audio streaming interface there
 for v in 1.1.0.1.1 1.1.0.0.1 1.1.0.1.0 1.1.0.0.0 0.1.0.1.1; do
     IFS=. read -r t_cdc t_uac t_lay t_on t_48 <<EOF
 $v
 EOF
-    $CC -DT_CDC="$t_cdc" -DT_UAC="$t_uac" -DT_LAYOUT="$t_lay" -DT_ON="$t_on" -DT_48K="$t_48" -DT_ASF=0 \
+    $CC -DT_CDC="$t_cdc" -DT_UAC="$t_uac" -DT_LAYOUT="$t_lay" -DT_ON="$t_on" -DT_48K="$t_48" -DT_ASF=0 -DT_ML=0 \
         -o "$OUT/usb_desc_test" tests/usb_desc_test.c
     run "USB descriptors (AC collection MIDI first): CDC $t_cdc (presented $t_on), UAC $t_uac (48 kHz $t_48)" \
         "$OUT/usb_desc_test"
