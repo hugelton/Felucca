@@ -205,6 +205,9 @@ CC="${CC:-cc} -O1 -Wall -Wno-unused-function $HALI"
 fail=0
 run() { echo "== $1"; shift; "$@" || fail=1; }
 
+run "package flash boundaries (synthetic SDK)" python3 tests/fm1pkg_test.py
+run "package flash boundaries (Python -O, synthetic SDK)" python3 -O tests/fm1pkg_test.py
+
 $CC -o "$OUT/storage_test" tests/storage_test.c
 $CC -Ibuild/gen -Ifirmware/src -o "$OUT/signed_audio_scaling_test" tests/signed_audio_scaling_test.c -lm
 run "DSP signed arithmetic: fixed DC/lowcut/FM6 vectors and phase wrap" "$OUT/signed_audio_scaling_test"
