@@ -370,6 +370,7 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "FM6 effective patch: editor/project/slot updates, engine switches, generation alias (core on/off)" "$OUT/fm6_eff_test"
     $CC -O1 -w -DFELUCCA_CPU2=0 -Ibuild/gen -Ifirmware/src -o "$OUT/fm6_eff_test_c1" tests/fm6_eff_test.c -lm
     run "FM6 effective patch: build without second core" "$OUT/fm6_eff_test_c1"
+    run "SysEx dispatch: editor/OTA ownership across interrupt arrivals" python3 tests/sysex_dispatch_test.py
     $CC -w -DFELUCCA_CPU2=0 -Ibuild/gen -Ifirmware/src -o "$OUT/editor_test_c1" tests/editor_test.c -lm
     run "editor, a FELUCCA_CPU2=0 build: MENU settings without 2ND CORE (ids 0..31)" "$OUT/editor_test_c1"
     $CC -w -Ibuild/gen -Ifirmware/src -o "$OUT/robust_test" tests/robust_test.c -lm
