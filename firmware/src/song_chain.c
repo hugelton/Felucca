@@ -38,6 +38,7 @@ static const step_t chain_silent[NSTEP] = {{{0}}};
 #define CHAIN_SIL_LEN 16
 #define CHAIN_SIL_DIV 2                      /* 1/16 */
 
+#define ND_NONE 0u                      /* track_t nd_late / nd_early: nothing latched (seq_tick; else its seq_pos + 1) */
 static void seq_release(track_t *t);
 static void seq_stop(void);
 static uint32_t div_samples(uint32_t div);
@@ -131,6 +132,11 @@ static __attribute__((noinline)) void chain_apply(void)
         t->seq_idx = (uint16_t)(t->p[P_SLEN] - 1);
         t->seq_pos = 0x7FFFFFFFu;
         t->rh_n = t->rskip_n = 0;
+        /* The old lane's delayed plays (NUDGE / TIME late, an early one latched or fired) end with it: only the clock
+         * track is at a step boundary here, and a late one would see the sentinel as past its time and play the new
+         * lane's last step before its first. (A note already sounding was released above.) */
+        t->nd_late = t->nd_early = ND_NONE;
+        t->nd_fired = 0;
     }
 }
 static void chain_start(void)

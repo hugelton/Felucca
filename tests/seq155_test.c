@@ -215,6 +215,114 @@ static int cond_song(void)
     return bad;
 }
 
+/* A SONG section replaces the lanes of every track at once, but only the clock track is at a note boundary. The
+ * other tracks' delayed events (NUDGE / TIME late play, an early play latched or already fired) belong to the old
+ * lane: they must not play the new lane's last step before its first, nor swallow its first step. Track 1 is the
+ * clock of section 1; track 2 carries the pending event. Slot 1 is the new section: both tracks LEN 4 of 1/16, track 2
+ * notes 70 (step 1) and 73 (step 4). Returns track 2's note-ons (block of each in blk) and the block of track 1's
+ * start of the section under test (note 51; the second, section 3, in the silent scene); pending reports the
+ * relevant delayed state observed immediately before the old section ended. */
+static uint32_t song_nudge_transition(uint32_t scene, uint8_t *nt, uint32_t *blk, uint32_t nmax, uint32_t *sec, uint32_t *pending)
+{
+    uint32_t n = 0, b = 0, k, v0, i, sections = 0;
+    track_t *t = melody(0), *u = &trk[1];
+    for (i = 0; i < NTRK; i++)
+        track_defaults_steps(&trk[i]);
+    u->p[P_VOICE] = V_POLY;
+    for (i = 0; i < 2u; i++) {                         /* slot 0: the old section */
+        trk[i].p[P_SDIV] = 2; trk[i].p[P_SGATE] = 64; trk[i].p[P_SSWING] = 0;
+    }
+    t->p[P_SQNT] = 1;
+    t->p[P_SLEN] = scene == 0u ? 3 : 1;                /* (fired: ends after step 2 plays early, before its start) */
+    t->step[0] = (step_t){{50}, 1, ST_NOTE, 0, 0};
+    u->p[P_SQNT] = 0;
+    u->p[P_SDIV] = 0;                                  /* a quarter: four of the clock's steps */
+    u->step[0] = (step_t){{60}, 1, ST_NOTE, 0, 0};
+    u->step[1] = (step_t){{61}, 1, ST_NOTE, 0, 0};
+    if (scene == 0u) {                                 /* step 2 played early (nd_fired = 2) before the boundary */
+        u->p[P_SLEN] = 2;
+        step_set_nudge(&u->step[1], -8);
+    } else if (scene == 2u) {                          /* step 2's early play latched, not yet due */
+        u->p[P_SLEN] = 2;
+        step_set_nudge(&u->step[1], -8);
+    } else {                                           /* step 1's late play (+7/16 of a quarter) still pending */
+        u->p[P_SLEN] = 16;
+        step_set_nudge(&u->step[0], 7);
+    }
+    project_save(0);
+    for (i = 0; i < 2u; i++) {                         /* slot 1: the new section */
+        trk[i].p[P_SLEN] = 4; trk[i].p[P_SDIV] = 2; trk[i].p[P_SQNT] = 1;
+        track_defaults_steps(&trk[i]);
+    }
+    t->step[0] = (step_t){{51}, 1, ST_NOTE, 0, 0};
+    u->step[0] = (step_t){{70}, 1, ST_NOTE, 0, 0};
+    u->step[3] = (step_t){{73}, 1, ST_NOTE, 0, 0};
+    project_save(1);
+    chain_config.count = scene == 3u ? 3 : 2;
+    chain_config.row[0] = (chain_row_t){{0, 0, 0, 0}, 1};
+    chain_config.row[1] = (chain_row_t){{1, scene == 3u ? CHAIN_SILENT : 1, 1, 1}, 1};
+    chain_config.row[2] = (chain_row_t){{1, 1, 1, 1}, 1};
+    *sec = 0xFFFFFFFFu;
+    *pending = 0;
+    if (chain_prepare())
+        return 0xFFFFu;
+    while (n < nmax && b++ < 40000u && (chain.running || chain.armed)) {
+        uint32_t row = chain.row;
+        uint32_t old = scene == 0u ? u->nd_fired : scene == 2u ? u->nd_early : u->nd_late;
+        v0 = vage;
+        events_block(CTL);
+        if (row == 0u && chain.row == 1u)              /* verify the intended old-lane event existed at the boundary */
+            *pending = old;
+        for (; v0 < vage; v0++)
+            for (k = 0; k < NVOICE; k++) {
+                if (trk[0].v[k].age == v0 + 1u && trk[0].v[k].note == 51u && (scene != 3u || ++sections == 2u) && *sec == 0xFFFFFFFFu)
+                    *sec = b;
+                if (u->v[k].age == v0 + 1u && n < nmax) {
+                    nt[n] = u->v[k].note;
+                    blk[n++] = b;
+                }
+            }
+    }
+    chain_defaults(&chain_config);
+    memset(proj_slot, 0, sizeof proj_slot);
+    return n;
+}
+static int song_stale_nudge(void)
+{
+    static const char *const name[4] = {
+        "an early play already fired (nd_fired) before the boundary",
+        "a positive NUDGE late play still pending at the boundary",
+        "an early play latched, not yet due, at the boundary",
+        "a late play pending, the next section's lane silent, then a lane again"};
+    int bad = 0;
+    uint32_t scene;
+    for (scene = 0; scene < 4u; scene++) {
+        uint8_t nt[32];
+        uint32_t blk[32], sec, pending, n = song_nudge_transition(scene, nt, blk, 32, &sec, &pending);
+        /* (a pending event in a chain: step 1 is never played early, nx 0 is excluded in seq_nd_start)
+         * the old lane's note 60/61 may sound only within its own section; from the new section: 70 on its first step,
+         * 73 on its last, each once, nothing else of the new lane early or twice */
+        uint32_t i, new70 = 0, new73 = 0, other = 0, ok;
+        char label[160];
+        for (i = 0; i < n; i++) {
+            if (blk[i] < sec)
+                continue;
+            new70 += nt[i] == 70u;
+            new73 += nt[i] == 73u;
+            other += nt[i] != 70u && nt[i] != 73u;
+        }
+        ok = pending && n != 0xFFFFu && sec != 0xFFFFFFFFu && new70 == 1u && new73 == 1u && !other;
+        for (i = 0; ok && i < n; i++)                  /* the first new-lane note is step 1 at the section's start */
+            if (blk[i] >= sec) {
+                ok = nt[i] == 70u && blk[i] == sec;
+                break;
+            }
+        snprintf(label, sizeof label, "SONG section replaces lanes: %s: the new lane starts at its step 1, no early step 4", name[scene]);
+        bad += check(label, ok);
+    }
+    return bad;
+}
+
 /* NUDGE: step 1 played early (QUANTIZE OFF, -4/16) belongs to the loop it starts */
 static int cond_nudge(void)
 {
@@ -604,7 +712,7 @@ static int test_double_half(void)
 
 int main(void)
 {
-    int bad = conditions() + cond_locks_rolls() + cond_song() + cond_nudge() + cond_ui() + fill_key() + cond_store() + test_euclid() + test_double_half();
+    int bad = conditions() + cond_locks_rolls() + cond_song() + song_stale_nudge() + cond_nudge() + cond_ui() + fill_key() + cond_store() + test_euclid() + test_double_half();
     printf("%s\n", bad ? "SEQ 1.5.5 TEST FAILED" : "seq 1.5.5 tests passed");
     return bad != 0;
 }
