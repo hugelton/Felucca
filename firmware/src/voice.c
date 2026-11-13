@@ -525,6 +525,8 @@ static void engine_block(track_t *t)
         }
     }
     eng_mem_claim(t);                                   /* (an engine set directly: power-on, a test) */
+    if (t->engine != ENGI_FM6)                          /* the audio-owned effective patch expires outside FM6 */
+        fm6_eff_drop(t);
     for (i = 0; i < 8u; i++)                            /* the engine's own values, for a later fade */
         t->pe_old[i] = t->p[P_E0 + i];
 }

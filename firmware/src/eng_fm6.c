@@ -43,13 +43,15 @@
 #define FM6_PACKED 128u
 
 static uint8_t fm6_patch[NTRK][FP_SIZE + 1u];   /* the tracks' patches (main loop writes, then fm6_pgen) */
-static volatile uint8_t fm6_pgen[NTRK];          /* +1 after each write of fm6_patch[t] */
+static volatile uint32_t fm6_pgen[NTRK];         /* +1 after each write of fm6_patch[t] (32 bits: one aligned word, a single
+                                                  * store for the audio side; with fm6_eff_drop) */
 static uint8_t fm6_slot[NTRK];                   /* the SLOT value last loaded (main loop); 0xFF = none */
 static uint8_t fm6_own[NTRK][FM6_PACKED] __attribute__((section(".pool")));   /* the own patch while SLOT shows a factory one (fm6_poll) */
 static uint8_t fm6_own_ok;                       /* bit tr: fm6_own[tr] holds it */
 static struct {                                  /* the patch through the macros: the audio ISR's copy */
     uint8_t p[FP_SIZE + 1u];
-    uint8_t gen, alg, fb, ok;
+    uint32_t gen;                                /* fm6_pgen[t] it was made at */
+    uint8_t alg, fb, ok;
     int16_t e[7];                                /* P_E0..P_E6 it was made with */
     int32_t dt[6];                               /* DTUN: per operator, Q24 log2 */
 } fm6_eff[NTRK];
@@ -274,6 +276,22 @@ static void fm6_poll(void)
 }
 
 /* -------------------------------------------------------------- macros --- */
+/* The patch/cache contract. fm6_patch/fm6_pgen are the main loop's: a write of the patch, then RING_PUBLISH(),
+ * then fm6_pgen++. fm6_eff is the audio side's alone (the main loop never writes it, with or without the second
+ * core): fm6_sync copies it from fm6_patch when fm6_pgen differs from the generation it was made at or the macros
+ * changed. A stale copy must not outlive the time the part does not render FM6: the part's engine memory is zeroed on
+ * a switch (engines.c eng_mem_claim) and fm6_pgen keeps counting the patch updates accepted meanwhile (the editor's
+ * FM6_PUT and a project load write a latent patch under any engine), so a counter of any width could come round to
+ * the value the cache was made at. fm6_eff_drop (voice.c engine_block, audio side, once a block, before the part's
+ * render) therefore drops the cache of a part whose engine is not FM6, and the first block on FM6 rebuilds it from the
+ * published patch. Within FM6 the part syncs every block, so a 32-bit generation cannot come round unseen. */
+static void fm6_eff_drop(const track_t *t)
+{
+    uint32_t tr = (uint32_t)(t - trk);
+    if (tr < NTRK)
+        fm6_eff[tr].ok = 0;
+}
+
 /* the patch through E0..E6 (audio ISR; cheap when nothing changed) */
 static void fm6_sync(const track_t *t)
 {
@@ -289,6 +307,8 @@ static void fm6_sync(const track_t *t)
             return;
     }
     fm6_eff[tr].gen = fm6_pgen[tr];
+    RING_PUBLISH();                                 /* the generation first, then the patch: a write in between leaves
+                                                     * the generation behind, the next block copies again */
     memcpy(fm6_eff[tr].p, fm6_patch[tr], FP_SIZE);
     for (k = 0; k < 7u; k++)
         fm6_eff[tr].e[k] = e[k];
