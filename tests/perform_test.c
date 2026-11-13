@@ -1009,6 +1009,70 @@ static int test_map(void)
         keyboard_block();
         perf_latch_on = 0;
         bad += check("  FX LATCH: the key's latched LPF becomes FLANGER as it is remapped; pressed again: off", ok);
+        /* FX LATCH switched on (the live preference: perf_latch_on) while a key holds its effect (#436): the last
+         * release ends the momentary hold; a latched effect stays; two keys hold it until both let go */
+        perf_latch_on = 0;
+        perf_map[0] = PF_LPF;
+        fm1_in.notes = 1u << 0;
+        keyboard_block();
+        ok = perf_held == PF_BIT(PF_LPF);
+        perf_latch_on = 1;
+        keyboard_block();
+        ok &= perf_held == PF_BIT(PF_LPF);
+        fm1_in.notes = 0;
+        keyboard_block();
+        ok &= !perf_held && !perf_latched;
+        perf_latch_on = 0;
+        bad += check("  FX LATCH on while a key is held: letting go ends the momentary effect", ok);
+        perf_map[0] = perf_map[1] = PF_LPF;
+        fm1_in.notes = 1u << 0 | 1u << 2;
+        keyboard_block();
+        perf_latch_on = 1;
+        fm1_in.notes = 1u << 2;
+        keyboard_block();
+        ok = perf_held == PF_BIT(PF_LPF);
+        fm1_in.notes = 0;
+        keyboard_block();
+        ok &= !perf_held && !perf_latched;
+        perf_latch_on = 0;
+        bad += check("  FX LATCH on with two keys of one effect held: it ends with the last of them", ok);
+        perf_latch_on = 1;                               /* a deliberate latch: kept after letting go, only its own bit */
+        perf_map[0] = PF_LPF;
+        perf_map[1] = PF_FLG;
+        fm1_in.notes = 1u << 0;
+        keyboard_block();
+        perf_latch_on = 0;
+        fm1_in.notes = 1u << 0 | 1u << 2;               /* (the second key momentary, LPF latched) */
+        keyboard_block();
+        perf_latch_on = 1;
+        fm1_in.notes = 1u << 0;
+        keyboard_block();
+        ok = perf_latched == PF_BIT(PF_LPF) && !perf_held;
+        fm1_in.notes = 0;
+        keyboard_block();
+        ok &= perf_latched == PF_BIT(PF_LPF) && !perf_held;
+        fm1_in.notes = 1u << 0;
+        keyboard_block();
+        fm1_in.notes = 0;
+        keyboard_block();
+        perf_latch_on = 0;
+        ok &= !perf_latched;
+        bad += check("  FX LATCH: a deliberate latch stays after letting go; a momentary one of another key ends", ok);
+        /* held, latch on, then remapped: the previous effect is not orphaned */
+        perf_map[0] = PF_LPF;
+        fm1_in.notes = 1u << 0;
+        keyboard_block();
+        perf_latch_on = 1;
+        perf_map[0] = PF_FLG;
+        perf_remap = 1;
+        keyboard_block();
+        ok = !(perf_held & PF_BIT(PF_LPF));
+        fm1_in.notes = 0;
+        keyboard_block();
+        ok &= !perf_held;
+        perf_latched = 0;
+        perf_latch_on = 0;
+        bad += check("  FX LATCH on, then the held key remapped: the old effect is not left held", ok);
         for (p = 0; p < PF_KEYS; p++)
             perf_map[p] = PF_DEF[p];
         fm1_in.buttons = 0;
