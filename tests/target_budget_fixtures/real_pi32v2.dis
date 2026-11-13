@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# dv_out from the unchanged firmware tree of main 19a7081.
+# JieLi Clang 4.0.1, -Os, selective minsize; actual objdump bytes.
+dv_out:
+ 2039e9e:    79 04              [--sp] = {rets, r9-r4}
+ 2039ea0:    12 59              if (r2 == 0) goto 114 <dv_out+0x76 : 2039f14 >
+ 2039ea2:    49 e0 00 c0        r9 = -16384 <_data_load+0xFFFFFFFFFDF8307C : ffffffffffffc000 >
+ 2039ea6:    c8 ff e4 ec 03 02  r8 = 33811684 <TANH_Q15 : 203ece4 >
+ 2039eac:    13 60              r3 = [r1+0]
+ 2039eae:    d0 ec 0c 45        r4 = [r0+92]
+ 2039eb2:    43 1b              r3 *= r4
+ 2039eb4:    bc bf              r4 = r3 >>> 31
+ 2039eb6:    bd ac              r5 = r3 >>> 12
+ 2039eb8:    53 1d              r3 = r5 + r4
+ 2039eba:    4b 19              r3 ^= r4
+ 2039ebc:    2d ff 80 3c 26 00  ifs (r3 <= 16384) goto 76 <dv_out+0x70 : 2039f0e >
+ 2039ec2:    33 a1              r3 = r3 << 1
+ 2039ec4:    a7 e0 00 3c        r7 = 0x8000 - r3
+ 2039ec8:    f6 e0 00 3c        r6 = r3 - 0x8000
+ 2039ecc:    36 ed 00 00        ifs (r6 >= 0) {
+ 2039ed0:    67 16                  r7 = r6
+                                }
+ 2039ed2:    fb a8              r3 = r7 >>> 8
+ 2039ed4:    44 e0 64 7b        r4 = 31588 <build/felucca_size.ll+0x7B64 : 7b64 >
+ 2039ed8:    13 fe 0b fe        ifs (r3 > 255) goto 22 <dv_out+0x54 : 2039ef2 >
+ 2039edc:    33 a1              r3 = r3 << 1
+ 2039ede:    dc ed 32 48        r4 = h[++r3=r8] (s)
+ 2039ee2:    54 ed 32 30        r3 = h[r3+2] (s)
+ 2039ee6:    33 1f              r3 = r3 - r4
+ 2039ee8:    67 e1 fe 70        r7 = r7 & 0xFE
+ 2039eec:    73 1b              r3 *= r7
+ 2039eee:    bb a8              r3 = r3 >>> 8
+ 2039ef0:    34 18              r4 += r3
+ 2039ef2:    a3 e0 00 40        r3 = 0x0 - r4
+ 2039ef6:    36 ed 00 00        ifs (r6 >= 0) {
+ 2039efa:    43 16                  r3 = r4
+                                }
+ 2039efc:    bb a1              r3 = r3 >>> 1
+ 2039efe:    b4 e0 92 43        r4 = r9 - r3
+ 2039f02:    e3 e0 80 3c        r3 = r3 + 0x4000
+ 2039f06:    35 ed 00 00        ifs (r5 >= 0) {
+ 2039f0a:    34 16                  r4 = r3
+                                }
+ 2039f0c:    45 16              r5 = r4
+ 2039f0e:    95 05              [r1++=4] = r5
+ 2039f10:    02 ea cc ff        if (--r2 != 0) goto -104 <dv_out+0xE : 2039eac >
+ 2039f14:    59 04              {pc, r9-r4} = [sp++]

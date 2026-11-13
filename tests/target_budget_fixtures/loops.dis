@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Synthetic pi32v2 objdump text, not executable firmware. See README.md.
+analog_render:
+ 100: 00 00  r0 = 0
+ 102: 00 00  r0 += 1
+ 104: 00 00  if r0 < r1 goto -2 <analog_render: 102 >
+ 106: 00 00  ret
+phase_render:
+ 200: 00 00  r0 = 0
+ 202: 00 00  r1 = 0
+ 204: 00 00  r1 += 1
+ 206: 00 00  if r1 < r2 goto -2 <phase_render: 204 >
+ 208: 00 00  if r0 < r3 goto -6 <phase_render: 202 >
+ 20a: 00 00  ret
+lofi_render:
+ 300: 00 00  r0 = 0
+ 302: 00 00  r0 += 1
+ 304: 00 00  if r0 < r1 goto -2 <lofi_render: 302 >
+ 306: 00 00  r2 = 0
+ 308: 00 00  r2 += 1
+ 30a: 00 00  if r2 < r3 goto -2 <lofi_render: 308 >
+ 30c: 00 00  ret
+sample_render:
+ 400: 00 00  r0 = 0
+ 402: 00 00  r0 += 1
+ 404: 00 00  if r0 < r1 goto -2 <sample_render: 402 >
+ 406: 00 00  r2 += 1
+ 408: 00 00  if r2 < r3 goto -6 <sample_render: 402 >
+ 40a: 00 00  ret
+formant_render:
+ 500: 00 00  if r0 == 0 goto 6 <formant_render: 506 >
+ 502: 00 00  r1 += 1
+ 504: 00 00  goto 6 <formant_render: 50a >
+ 506: 00 00  r2 = 1
+ 508: 00 00  goto -6 <formant_render: 502 >
+ 50a: 00 00  ret
+trio_render:
+ 600: 00 00  r0 = 0
+ 602: 00 00  call <trio_pass>
+ 604: 00 00  r0 += 1
+ 606: 00 00  if r0 < r1 goto -4 <trio_render: 602 >
+ 608: 00 00  ret
+trio_pass:
+ 700: 00 00  r0 = r1 / r2
+ 702: 00 00  r3 += 1
+ 704: 00 00  if r3 < r4 goto -4 <trio_pass: 700 >
+ 706: 00 00  ret
+wheel_render:
+ 800: 00 00  r0 = r1 / r2
+ 802: 00 00  r3 = r4 / r5
+ 804: 00 00  r6 += 1
+ 806: 00 00  if r6 < r7 goto -4 <wheel_render: 802 >
+ 808: 00 00  ret
+grain_render:
+ 900: 00 00  r0 = 0
+ 902: 00 00  r0 += 1
+ 904: 00 00  if r0 < r1 goto -2 <grain_render: 902 >
+ 906: 00 00  ret
+grain_block:
+ a00: 00 00  r0 = 0
+ a02: 00 00  r1 = 0
+ a04: 00 00  r2 = 0
+ a06: 00 00  r3 = 0
+ a08: 00 00  r4 = 0
+ a0a: 00 00  r5 += 1
+ a0c: 00 00  if r5 < r6 goto -2 <grain_block: a0a >
+ a0e: 00 00  if r4 < r6 goto -6 <grain_block: a08 >
+ a10: 00 00  if r3 < r6 goto -10 <grain_block: a06 >
+ a12: 00 00  if r2 < r6 goto -14 <grain_block: a04 >
+ a14: 00 00  if r1 < r6 goto -18 <grain_block: a02 >
+ a16: 00 00  ret
+mod_begin:
+ b00: 00 00  call <trio_pass>
+ b02: 00 00  r0 = r1 / r2
+ b04: 00 00  ret

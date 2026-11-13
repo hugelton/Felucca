@@ -51,14 +51,16 @@ budget = sys.argv[2] if len(sys.argv) > 2 else "tests/target_budget.txt"
 LABEL = re.compile(r"^([A-Za-z_][A-Za-z_0-9.]*):$")
 INSN = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*(.*)$")
 TARGET = re.compile(r"goto -?\d+ <[^>]*: ([0-9a-f]+) >")
+ADDRESS = re.compile(r"^\s*[0-9a-f]+:")
+UNDECODED = re.compile(r"^(?:\.\w+|\(bad\)|unknown\b|unknown_instruction\b)", re.I)
 
 
 def functions(path):
     """{name: [(addr, text)]}: a function runs to the next label not starting with '.' (the compiler's
     jump-table labels are inside functions); jump-table data ('< n : 0x.. >') is left out"""
-    out, cur = {}, None
+    out, cur, name = {}, None, None
     with open(path) as f:
-        for line in f:
+        for no, line in enumerate(f, 1):
             m = LABEL.match(line.strip())
             if m:
                 name = m.group(1)
@@ -66,8 +68,18 @@ def functions(path):
                     cur = out.setdefault(name, []) if name in FUNCS else None
                 continue
             m = INSN.match(line)
-            if cur is not None and m and not m.group(3).lstrip().startswith("<"):
-                cur.append((int(m.group(1), 16), m.group(3).strip()))
+            if cur is None:
+                continue
+            if not m:
+                if ADDRESS.match(line):
+                    raise ValueError(f"{path}:{no}: {name}: unparsed instruction: {line.strip()}")
+                continue
+            text = m.group(3).strip()
+            if text.startswith("<"):               # objdump jump-table data
+                continue
+            if not text or UNDECODED.match(text):
+                raise ValueError(f"{path}:{no}: {name}: undecoded instruction: {text or '(empty)'}")
+            cur.append((int(m.group(1), 16), text))
     return out
 
 
@@ -122,15 +134,27 @@ def main():
     if not os.path.exists(dis):
         print(f"target: skip ({dis} missing: run ./build.sh)")
         return 0
-    fns = functions(dis)
+    try:
+        fns = functions(dis)
+    except (OSError, ValueError) as e:
+        print(f"target: FAIL {e}")
+        return 1
     res = {n: cost(fns[n]) for n in FUNCS if fns.get(n)}
     missing = [n for n in FUNCS if n not in res and n not in OPTIONAL]
     base = {}
     if os.path.exists(budget):
-        for line in open(budget):
-            p = line.split()
-            if len(p) >= 2 and not line.startswith("#"):
-                base[p[0]] = int(p[1])
+        with open(budget) as f:
+            for no, line in enumerate(f, 1):
+                p = line.split()
+                if len(p) >= 2 and not line.startswith("#"):
+                    try:
+                        value = int(p[1])
+                        if value < 0:
+                            raise ValueError
+                    except ValueError:
+                        print(f"target: FAIL {budget}:{no}: invalid budget for {p[0]}: expected a nonnegative integer")
+                        return 1
+                    base[p[0]] = value
     if os.environ.get("BUDGET_UPDATE"):
         with open(budget, "w") as f:
             f.write("# FELUCCA target cost budget (tests/target_budget.py): instructions in the loops of each\n"
@@ -150,7 +174,11 @@ def main():
             b = ONE_CORE[n]
         state = "no budget (BUDGET_UPDATE=1 adds it)" if b is None else "ok"
         if b is not None and not os.environ.get("BUDGET_UPDATE"):
-            if r["cost"] > b * (1 + TOL):
+            if b == 0:
+                if r["cost"] > 0:
+                    state = f"OVER BUDGET (cost {r['cost']} exceeds zero baseline)"
+                    fail += 1
+            elif r["cost"] > b * (1 + TOL):
                 state = f"OVER BUDGET (+{(r['cost'] / b - 1) * 100:.0f} %, limit +{TOL * 100:.0f} %)"
                 fail += 1
             elif r["cost"] < b * (1 - TOL):
