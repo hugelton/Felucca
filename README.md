@@ -35,3 +35,5 @@ Felucca is free software under [GPL-3.0-only](LICENSE); the Hügelton Sample Pac
 M-VAVE and FM-1 are trademarks of their respective owners. Felucca is not affiliated with, endorsed by or supported by M-VAVE.
 
 Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+
+You can also try Felucca in the browser, no flashing needed, in the free community [FM-1 Emulator](https://fm1-emulator.atst.tools/).
