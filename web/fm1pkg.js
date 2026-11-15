@@ -8,6 +8,15 @@ const BLOCKS = 20, BLK = 0x30, KEEP = 0x2F;
 export const STOCK_V15_SHA256 = "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a";
 export const STOCK_APP_SIZE = 0x8DFBC;
 export const STOCK_V15_SIZE = 699956;
+// the official firmware files a return to stock accepts (FM-1.fwsc from M-VAVE, unmodified): size, SHA-256 and the layout
+// each one has (#329: V16, 2026-10-21, writes 88 KiB more of the flash and moves the app)
+export const STOCK = [
+  { version: "V15", size: STOCK_V15_SIZE, sha256: STOCK_V15_SHA256, product: "FM-1_015", flashSize: 602112,
+    appOff: 16672, appSize: STOCK_APP_SIZE },
+  { version: "V16", size: 718196, sha256: "d017fb65e70aca97ee29d944470c3515a74581df5c0576bf70de917c7b2b61d5",
+    product: "FM-1_016", flashSize: 692224, appOff: 16704, appSize: 597928 },
+];
+export const STOCK_SIZES = STOCK.map((k) => k.size);
 
 const T = new Uint16Array(256);
 for (let i = 0; i < 256; i++) {
@@ -232,17 +241,18 @@ export async function sha256hex(bytes) {
   return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-// Only the user's unmodified official V15 is accepted for a return to stock.
+// Only the user's unmodified official V15 or V16 is accepted for a return to stock.
 // The digest pins every file, loader and flash layout; filenames are not evidence.
 export async function validateStockPackage(bytes) {
-  if (bytes.length !== STOCK_V15_SIZE || await sha256hex(bytes) !== STOCK_V15_SHA256)
-    throw new Error("Select the unmodified official FM-1 V15 file (FM-1.fwsc).");
+  const sha = STOCK_SIZES.includes(bytes.length) ? await sha256hex(bytes) : "";
+  const k = STOCK.find((x) => x.size === bytes.length && x.sha256 === sha);
+  if (!k) throw new Error("Select the unmodified official FM-1 V15 or V16 file (FM-1.fwsc).");
   const pkg = new Package(bytes);
-  if (pkg.product !== "FM-1_015" || pkg.flashFileOff !== 1044 || pkg.flashSize !== 602112 ||
-      pkg.appBase !== 16384 || pkg.appOff !== 16672 || pkg.app.size !== STOCK_APP_SIZE ||
+  if (pkg.product !== k.product || pkg.flashFileOff !== 1044 || pkg.flashSize !== k.flashSize ||
+      pkg.appBase !== 16384 || pkg.appOff !== k.appOff || pkg.app.size !== k.appSize ||
       !pkg.entries.some((e) => e.type === 100 && e.name === "ota.bin" && e.size === 19969))
     throw new Error("The official firmware has an unsupported FM-1 layout.");
-  return { product: pkg.product, image: logicalImage(bytes), sha256: STOCK_V15_SHA256 };
+  return { product: pkg.product, version: k.version, image: logicalImage(bytes), sha256: k.sha256 };
 }
 
 // official V15 + Felucca app -> installable package (Uint8Array)

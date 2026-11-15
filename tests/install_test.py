@@ -7,6 +7,7 @@ then "device asks, host answers" reads of the logical image. Run from the repo r
   python3 tests/install_test.py
 Also checks logical_image/product_of against web/fm1pkg.js (needs node and
 build/felucca.fwsc, skipped otherwise)."""
+import hashlib
 import io
 import queue
 import shutil
@@ -289,22 +290,24 @@ def against_js():
 
 
 def official():
-    """#32: back to the official V15 from Felucca, without --force (only the unmodified file)"""
-    v15 = ROOT / "FM-1_v15.fwsc"
-    if not v15.exists():
-        print("official V15 restore: skipped (needs FM-1_v15.fwsc in the repo root)")
-        return
-    raw = v15.read_bytes()
-    dev = FakeFM1(I.logical_image(raw), identity="FM-1_900", name="Felucca", after_write="FM-1_015")
-    rc, out, err = cli([str(v15), "--yes"], dev)
-    ok(rc == 0 and dev.bad == 0 and "FM-1_015" in out and dev.identity == "FM-1_015",
-       "official V15 (FM-1.fwsc) from Felucca: installed without --force, back as FM-1_015")
-    bad = bytearray(raw)
-    bad[-1] ^= 1
-    dev = FakeFM1(I.logical_image(bytes(bad)), identity="FM-1_900", name="Felucca")
-    rc, out, err = cli([pkgfile("v15mod.fwsc", bytes(bad)), "--yes"], dev)
-    ok(rc == 2 and "official V15" in err and dev.sent == [], "a modified V15 is still refused (no MIDI)")
-
+    """#32, #329: back to the official V15 or V16 from Felucca, without --force (only the unmodified files)"""
+    for name, ident in (("FM-1_v15.fwsc", "FM-1_015"), ("FM-1_v16.fwsc", "FM-1_016")):
+        f = ROOT / name
+        if not f.exists():
+            print(f"official {ident} restore: skipped (needs {name} in the repo root)")
+            continue
+        raw = f.read_bytes()
+        ok(hashlib.sha256(raw).hexdigest() in I.STOCK_SHA256 and I.product_of(raw) == ident,
+           f"{name}: the unmodified official file, {ident}")
+        dev = FakeFM1(I.logical_image(raw), identity="FM-1_900", name="Felucca", after_write=ident)
+        rc, out, err = cli([str(f), "--yes"], dev)
+        ok(rc == 0 and dev.bad == 0 and ident in out and dev.identity == ident,
+           f"official {name} from Felucca: installed without --force, back as {ident}")
+        bad = bytearray(raw)
+        bad[-1] ^= 1
+        dev = FakeFM1(I.logical_image(bytes(bad)), identity="FM-1_900", name="Felucca")
+        rc, out, err = cli([pkgfile("stockmod.fwsc", bytes(bad)), "--yes"], dev)
+        ok(rc == 2 and "official V15 or V16" in err and dev.sent == [], f"a modified {name} is still refused (no MIDI)")
 
 wire()
 installs()
