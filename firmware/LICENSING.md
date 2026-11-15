@@ -107,8 +107,8 @@ Every distribution of a package carries the licence texts with it: the release f
 
 No M-VAVE material is part of Felucca. The firmware links no vendor code and contains no vendor
 data, and the packages hold only Felucca and the three SDK files above. The installer's
-"Return to official V15" holds only the official file's size and SHA-256: you select the
-official firmware file you downloaded yourself, and it is checked and installed in your browser,
+"Return to official firmware" holds only the official V15 and V16 files' sizes and SHA-256: you select
+the official firmware file you downloaded yourself, and it is checked and installed in your browser,
 never uploaded or redistributed.
 
 ## Contributions

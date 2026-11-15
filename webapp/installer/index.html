@@ -170,6 +170,15 @@ const BLOCKS = 20, BLK = 0x30, KEEP = 0x2F;
 const STOCK_V15_SHA256 = "db1642b2b6fa5c2cccb11ffd13878068bb28601678d3644049f99dc40e7edb8a";
 const STOCK_APP_SIZE = 0x8DFBC;
 const STOCK_V15_SIZE = 699956;
+// the official firmware files a return to stock accepts (FM-1.fwsc from M-VAVE, unmodified): size, SHA-256 and the layout
+// each one has (Felucca#329: V16, 2026-10-21, writes 88 KiB more of the flash and moves the app)
+const STOCK = [
+  { version: "V15", size: STOCK_V15_SIZE, sha256: STOCK_V15_SHA256, product: "FM-1_015", flashSize: 602112,
+    appOff: 16672, appSize: STOCK_APP_SIZE },
+  { version: "V16", size: 718196, sha256: "d017fb65e70aca97ee29d944470c3515a74581df5c0576bf70de917c7b2b61d5",
+    product: "FM-1_016", flashSize: 692224, appOff: 16704, appSize: 597928 },
+];
+const STOCK_SIZES = STOCK.map((k) => k.size);
 
 const T = new Uint16Array(256);
 for (let i = 0; i < 256; i++) {
@@ -394,17 +403,18 @@ async function sha256hex(bytes) {
   return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-// Only the user's unmodified official V15 is accepted for a return to stock.
+// Only the user's unmodified official V15 or V16 is accepted for a return to stock.
 // The digest pins every file, loader and flash layout; filenames are not evidence.
 async function validateStockPackage(bytes) {
-  if (bytes.length !== STOCK_V15_SIZE || await sha256hex(bytes) !== STOCK_V15_SHA256)
-    throw new Error("Select the unmodified official FM-1 V15 file (FM-1.fwsc).");
+  const sha = STOCK_SIZES.includes(bytes.length) ? await sha256hex(bytes) : "";
+  const k = STOCK.find((x) => x.size === bytes.length && x.sha256 === sha);
+  if (!k) throw new Error("Select the unmodified official FM-1 V15 or V16 file (FM-1.fwsc).");
   const pkg = new Package(bytes);
-  if (pkg.product !== "FM-1_015" || pkg.flashFileOff !== 1044 || pkg.flashSize !== 602112 ||
-      pkg.appBase !== 16384 || pkg.appOff !== 16672 || pkg.app.size !== STOCK_APP_SIZE ||
+  if (pkg.product !== k.product || pkg.flashFileOff !== 1044 || pkg.flashSize !== k.flashSize ||
+      pkg.appBase !== 16384 || pkg.appOff !== k.appOff || pkg.app.size !== k.appSize ||
       !pkg.entries.some((e) => e.type === 100 && e.name === "ota.bin" && e.size === 19969))
     throw new Error("The official firmware has an unsupported FM-1 layout.");
-  return { product: pkg.product, image: logicalImage(bytes), sha256: STOCK_V15_SHA256 };
+  return { product: pkg.product, version: k.version, image: logicalImage(bytes), sha256: k.sha256 };
 }
 
 // official V15 + Felucca app -> installable package (Uint8Array)
@@ -900,11 +910,11 @@ const TEXT = {
     direct: "USB ケーブルはパソコンに直接つないでください。Probe や Transporter などの機材は不要です。",
     brick: "万一インストールに失敗して起動しなくなった場合は、復旧に Transporter が必要です:",
     beta: "Felucca 1.0 は実地テスト版です。不具合は GitHub で知らせてください。このカスタムファームウェアを使ったことで FM-1 が壊れたり不具合が起きたりしても、作者は一切の責任を負いません。自己責任でお使いください。",
-    back: "M-VAVEから公式FM-1 V15を取得し、未変更のFM-1.fwscを選んでください。ファイルはこのブラウザ内で検証し、サーバーへ送りません。",
-    stockTitle: "公式V15に戻す", stockFile: "公式FM-1.fwsc", stockGo: "バックアップして公式V15へ戻す",
+    back: "M-VAVEから公式FM-1 V15かV16を取得し、未変更のFM-1.fwscを選んでください。ファイルはこのブラウザ内で検証し、サーバーへ送りません。",
+    stockTitle: "公式ファームウェア（V15 / V16）に戻す", stockFile: "公式FM-1.fwsc", stockGo: "バックアップして公式ファームウェアへ戻す",
     stockBackup: "現在の曲・保存曲・音色バンク・サンプル・設定を先に保存します。全体バックアップ非対応版は、Feluccaを更新してから行ってください。復元はFeluccaを再インストールしてエディタから行います。",
     stockRecovery: "更新中断の再開：全体バックアップはすでにパソコンへ保存済み",
-    stockValid: "公式V15を確認しました", stockConfirm: "全体バックアップファイルをパソコンに保存できましたか？ 続けると公式V15へ戻します。Feluccaの曲は公式V15では開けません。",
+    stockValid: "公式ファームウェアを確認しました: ", stockConfirm: "全体バックアップファイルをパソコンに保存できましたか？ 続けると公式ファームウェアへ戻します。Feluccaの曲は公式ファームウェアでは開けません。",
     stockNeedBackup: "書き込みモードからはバックアップできません。保存済みバックアップがある場合だけ、更新中断の再開にチェックしてください。",
     stockUnsupported: "このFeluccaは全体バックアップに未対応です。先に最新版をインストールしてください。",
     backup: "全体バックアップ保存中 ", stockError: "公式ファイルを確認できません: ",
@@ -934,11 +944,11 @@ const TEXT = {
     direct: "Connect the USB cable directly to the computer. No probe or Transporter is needed.",
     brick: "If an install fails and the FM-1 no longer starts, recovering it needs a Transporter:",
     beta: "Felucca 1.0 is a field-testing release; please report problems on GitHub. The author accepts no responsibility if your FM-1 is damaged or misbehaves because of this custom firmware. Use it at your own risk.",
-    back: "Get official FM-1 V15 from M-VAVE and select the unmodified FM-1.fwsc. The browser validates it locally; it is not sent to a server.",
-    stockTitle: "Return to official V15", stockFile: "Official FM-1.fwsc", stockGo: "Back up and return to official V15",
+    back: "Get official FM-1 V15 or V16 from M-VAVE and select the unmodified FM-1.fwsc. The browser validates it locally; it is not sent to a server.",
+    stockTitle: "Return to official firmware (V15 / V16)", stockFile: "Official FM-1.fwsc", stockGo: "Back up and return to official firmware",
     stockBackup: "Current music, saved music, sound banks, samples and settings are saved first. Older firmware needs a Felucca update for complete backups. To restore an archive later, reinstall Felucca and use the editor.",
     stockRecovery: "Resume an interrupted update: I already saved a complete backup to this computer",
-    stockValid: "Official V15 verified", stockConfirm: "Has the complete backup file been saved to this computer? Continue to return to official V15. Official V15 cannot open Felucca music.",
+    stockValid: "Official firmware verified: ", stockConfirm: "Has the complete backup file been saved to this computer? Continue to return to official firmware. Official firmware cannot open Felucca music.",
     stockNeedBackup: "An update loader cannot export a backup. Only select resume if you already saved a complete backup.",
     stockUnsupported: "This Felucca does not support complete backups. Install the current Felucca first.",
     backup: "Saving complete backup ", stockError: "Cannot validate official firmware: ",
@@ -1042,10 +1052,10 @@ $("stock-file").addEventListener("change", async () => {
   const epoch = ++stockFileEpoch, file = $("stock-file").files[0]; stock = null; lockInstaller(false);
   if (!file) return;
   try {
-    if (file.size !== STOCK_V15_SIZE) throw new Error("FM-1 V15 / FM-1.fwsc");
+    if (!STOCK_SIZES.includes(file.size)) throw new Error("FM-1 V15 / V16 FM-1.fwsc");
     const verified = await validateStockPackage(new Uint8Array(await file.arrayBuffer()));
     if (epoch !== stockFileEpoch) return;
-    stock = verified; sayK("stockValid"); lockInstaller(false);
+    stock = verified; sayK("stockValid", verified.version); lockInstaller(false);
   } catch (e) { if (epoch === stockFileEpoch) sayK("stockError", e.message); }
 });
 function saveArchive(archive) {
