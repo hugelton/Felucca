@@ -47,6 +47,7 @@ it adds to a release leave `firmware/engines/` and `firmware/bsp/` empty; each r
   ```
 
 - Node.js (optional, for the web tests).
+- Emscripten (optional, `emcc`: the browser demo, `web/emu/`).
 
 On Linux x86-64 the toolchain runs natively and Docker is not needed.
 
@@ -94,13 +95,27 @@ again from the source repositories. Without that folder the build still works, w
 instrument sets in the SAMPLE engine and no PIANO in SLICE (the PIANO set's middle C): they play a plain sine
 at the note's pitch instead, and the screen says NO SAMPLE.
 
+## Browser demo
+
+```
+./build.sh
+web/emu/build.sh
+python3 -m http.server -d build/emu 8790     # open http://localhost:8790/
+```
+
+`web/emu/felucca_web.c` builds the firmware's sources as the host tests do, against a simulated FM-1, and
+Emscripten compiles it to WebAssembly (`build/emu/felucca.wasm`, with `index.html`, `worklet.js` and the font in `fonts/`).
+It is a demo: the page keeps the flash's storage sectors (projects, user presets, settings) in the browser; USB (audio,
+MIDI out, the editor, updates), TRS MIDI and the user sample slots are not emulated. A build of it is on the site:
+<https://hugelton.github.io/Felucca/webapp/try/>.
+
 ## Tests
 
 ```
 tests/run_tests.sh
 ```
 
-Runs the firmware's host-side unit and regression tests and, with Node.js, the installer/editor tests. Run it after `./build.sh`
+Runs the firmware's host-side unit and regression tests and, with Node.js, the installer/editor tests (and, with Emscripten too, the browser demo's). Run it after `./build.sh`
 (it uses `build/` and needs `AC79_SDK` set as for the build). The suites cover flash storage,
 user presets, projects of every format, backup, the keys and knobs, MIDI (USB, TRS, clock,
 control), USB audio, the update entry and loader, the command-line installer, the UI (the real

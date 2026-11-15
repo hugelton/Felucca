@@ -16,6 +16,7 @@ The FM-1 is the only supported hardware target. This project does not provide, m
 
 - [Web installer](https://hugelton.github.io/Felucca/)
 - [Web editor](https://hugelton.github.io/Felucca/webapp/editor/) ([source](https://github.com/hugelton/Felucca-WebApp))
+- [Try it in your browser](https://hugelton.github.io/Felucca/webapp/try/): a demo of the firmware, no FM-1 needed
 - [Manual and release notes](https://github.com/hugelton/Felucca/wiki/Home)
 - [Building from source](BUILDING.md)
 - [Issue tracker](https://github.com/hugelton/Felucca/issues)
