@@ -236,11 +236,12 @@ class CommandLineFixtures(unittest.TestCase):
                     self.assertEqual(self.budget.read_bytes(), before)
 
     def test_optional_function_fallback_and_explicit_budget(self):
-        self.write_dis(extra=("uac_tap48",), loops={"uac_tap48": 600})
+        over = OPTIONAL["uac_tap48"] + 100           # (above the default budget, whatever it is)
+        self.write_dis(extra=("uac_tap48",), loops={"uac_tap48": over})
         result = self.cli()
         self.assert_status(result, 1)
         self.assertIn(f"(budget {OPTIONAL['uac_tap48']}) OVER BUDGET", result.stdout)
-        self.write_budget(extra="uac_tap48 600\n")
+        self.write_budget(extra=f"uac_tap48 {over}\n")
         self.assert_status(self.cli(), 0)
 
     def test_one_core_fallback_and_dual_core_explicit_budget(self):
