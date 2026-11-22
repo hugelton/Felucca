@@ -315,6 +315,8 @@ if [ -f build/gen/felucca_tables.h ]; then
     run "TRS clock and four sequencers under saturated learned CCs (full upstream map)" "$OUT/timer5_cc_clock_test"
     $CC -O1 -w -DFELUCCA_FM4=1 -Ibuild/gen -Ifirmware/src -o "$OUT/digital_test" tests/digital_test.c -lm
     run "DIGITAL (retired, built here with FELUCCA_FM4=1): operator envelopes/levels" "$OUT/digital_test"
+    $CC -O2 -w -Ibuild/gen -Ifirmware/src -o "$OUT/trio_retrig_test" tests/trio_retrig_test.c -lm
+    run "TRIO: a retrigger in the release keeps the filter (no click, #321)" "$OUT/trio_retrig_test"
     $CC -O2 -w -DFELUCCA_FM4=1 -Ibuild/gen -Ifirmware/src -o "$OUT/fm4_test" tests/fm4_test.c -lm
     mkdir -p build/fm4_demo
     run "DIGITAL -> FM6: the conversion against DIGITAL (FELUCCA_FM4=1): pitch, centroid, RMS envelope; demos" \
