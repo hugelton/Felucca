@@ -12,6 +12,7 @@
  *   build/host/drumfuzz SEED0 NSEEDS STEPS [song]
  * run_tests.sh runs a short one; #211 (1.5.5 and v1.5-src): 200 seeds x 4000 steps each way, nothing found. */
 #define UI_TEST_NO_MAIN 1
+#include <stdint.h>
 #include <signal.h>
 #include <stdint.h>                       /* (uint32_t below, before any Felucca header: glibc, #281) */
 #include <unistd.h>
