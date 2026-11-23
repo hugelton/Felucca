@@ -84,6 +84,7 @@ const TEXT = {
     notfound: "FM-1 が見つかりません。USB ケーブル（データ通信用か）を確かめ、MIDI を使う他のアプリを閉じてから、もう一度押してください。",
     model: "接続されている機器は FM-1 ではありません。",
     lost: "USB の接続が切れました。挿し直してもう一度押してください。",
+    ambiguous: "対象の FM-1 を特定できません。更新したい FM-1 だけを接続して、もう一度お試しください。",
     noloader: "書き込みモードの FM-1 が見つかりません。USB を挿し直してもう一度押してください（終わるまで書き込みモードのままです）。",
     noreturn: "FM-1 が戻ってきません。電源を入れ直してください。",
     mismatch: "書き込みは終わりましたが、FM-1 が別のバージョンを報告しています: ",
@@ -115,6 +116,7 @@ const TEXT = {
     notfound: "FM-1 not found. Check the USB cable (a data cable), close other apps that use MIDI, and press Install again.",
     model: "The connected device is not an FM-1.",
     lost: "The USB connection was lost. Replug it and press Install again.",
+    ambiguous: "Could not identify a single FM-1 target. Connect only the FM-1 you want to update and try again.",
     noloader: "The FM-1 in update mode was not found. Replug the USB cable and press Install again (it stays in update mode until it is finished).",
     noreturn: "The FM-1 did not come back. Power-cycle it.",
     mismatch: "Written, but the FM-1 reports another version: ",
@@ -160,6 +162,7 @@ window.addEventListener("beforeunload", (e) => { if (writing) { e.preventDefault
 $("go").addEventListener("click", async () => {
   if (writing) return;
   lockInstaller(true);
+  $("bar").value = 0;
   let midi;
   try { midi = await navigator.requestMIDIAccess({ sysex: true }); }
   catch (e) { sayK("denied"); lockInstaller(false); return; }
@@ -171,14 +174,13 @@ $("go").addEventListener("click", async () => {
       if (k === "start") sayK("start");
       if (k === "verify") { sayK("verify"); $("bar").value = (a / total) * 100; }
       if (k === "loader") sayK("loader");
-      if (k === "write") { sayK("write"); $("bar").value = ((74 + a) / total) * 100; }
+      if (k === "write") { sayK("write"); $("bar").value = Math.min(99, ((74 + a) / total) * 100); }
       if (k === "reboot") sayK("reboot");
       if (k === "done") { $("bar").value = 100; sayK("done"); }
     };
     const ota = await up.find((id) => /^ota-/i.test(id.model));
     if (ota) {
-      ota.link.close();
-      sayK((await up.resume(image, step, meta.product)) ? "done" : "stopped");
+      if (!(await up.resume(image, step, meta.product, ota))) sayK("stopped");
     } else {
       await up.install(image, meta.product, step);
     }
@@ -217,19 +219,20 @@ function archiveInfo(a) {
 }
 $("stock-go").addEventListener("click", async () => {
   if (!stock || writing) return;
-  const selected = stock; lockInstaller(true);
-  let link = null;
+  const selected = stock; lockInstaller(true); $("bar").value = 0;
+  let link = null, loader;
   try {
     let midi;
     try { midi = await navigator.requestMIDIAccess({sysex:true}); } catch (e) { sayK("denied"); return; }
     const up = new Updater(midi, log);
     const step = (k, n) => { log(`${k} ${n ?? ""}`); if (["start","verify","loader","write","reboot","done"].includes(k)) sayK(k); if (k === "done") $("bar").value = 100; };
-    const loader = await up.find(id => id.model === "ota-FM-1");
+    loader = await up.find(id => id.model === "ota-FM-1");
     if (loader) {
-      loader.link.close();
       if (!$("stock-recovery").checked) { sayK("stockNeedBackup"); return; }
       if (!confirm(t("stockConfirm"))) return;
-      sayK(await up.resume(selected.image, step, selected.product) ? "done" : "stopped");
+      const ota = loader;
+      loader = null;  // resume owns this link from here
+      if (!(await up.resume(selected.image, step, selected.product, ota))) sayK("stopped");
     } else {
       const device = await up.find(id => id.model === "FM-1");
       if (!device) { sayK("notfound"); return; }
@@ -246,7 +249,11 @@ $("stock-go").addEventListener("click", async () => {
   } catch (e) {
     if (e.code && TEXT[lang][e.code]) sayK(e.code,e.detail || ""); else sayK("error",e.message);
     log(String(e.stack || e));
-  } finally { if (link) link.close(); lockInstaller(false); }
+  } finally {
+    if (link) link.close();
+    await loader?.link.release();
+    lockInstaller(false);
+  }
 });
 </script>
 </body>

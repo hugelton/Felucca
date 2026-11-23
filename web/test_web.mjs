@@ -8,7 +8,7 @@
 //   and the mixer, the v5 drum grid in steps and user presets), its tab layout and ja/en strings,
 //   and the user-sample pipeline byte for byte against tools/sampleio.py
 // - fm1pkg.js: productOf and logicalImage on build/felucca.fwsc (skipped without a build)
-// - fm1ota.js: a full install and an unplug during the write against a simulated FM-1
+// - fm1ota.js: install, resume and USB re-enumeration against simulated FM-1s
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -1640,22 +1640,32 @@ const UPGRADE = [0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7];
 
 /* an FM-1 on WebMIDI: identity, then "device asks, host answers" reads of the image */
 class FakeFM1 {
-  constructor(image, { unplugAfter = Infinity } = {}) {
+  constructor(image, { unplugAfter = Infinity, returned = "FM-1_900", onReboot,
+    failFinish = false, identity = "FM-1_015", name = "FM-1", access = Object.assign(new EventTarget(), { inputs: new Map(), outputs: new Map() }) } = {}) {
     this.image = image; this.unplugAfter = unplugAfter; this.served = 0; this.bad = 0;
-    this.access = { inputs: new Map(), outputs: new Map() };
-    this.boot("FM-1_015", "FM-1");
+    Object.assign(this, { access, returned, onReboot, failFinish, upgrades: 0 });
+    this.boot(identity, name);
   }
   boot(identity, name) {
     this.identity = identity; this.waiting = null; this.queue = [];
-    for (const m of [this.access.inputs, this.access.outputs]) { for (const p of m.values()) p.state = "disconnected"; m.clear(); }
+    this.disconnect();
     const id = Math.random().toString(36).slice(2);
     this.input = { id: "i" + id, name, state: "connected", onmidimessage: null, open: async () => {} };
     this.output = { id: "o" + id, name, state: "connected", open: async () => {}, send: (d) => {
       if (this.output.state !== "connected") throw new Error("InvalidStateError");
+      if (this.failFinish && this.waiting?.[0] === 0xF0000000) throw new Error("finish acknowledgment failed");
       setTimeout(() => this.rx(Array.from(d)), 1);
     } };
     this.access.inputs.set(this.input.id, this.input);
     this.access.outputs.set(this.output.id, this.output);
+    this.access.dispatchEvent(new Event("statechange"));
+  }
+  disconnect() {
+    if (!this.input) return;
+    this.input.state = this.output.state = "disconnected";
+    this.access.inputs.delete(this.input.id);
+    this.access.outputs.delete(this.output.id);
+    this.access.dispatchEvent(new Event("statechange"));
   }
   tx(bytes) { const i = this.input; setTimeout(() => { if (i.state === "connected" && i.onmidimessage) i.onmidimessage({ data: Uint8Array.from(bytes) }); }, 1); }
   rx(d) {
@@ -1664,6 +1674,7 @@ class FakeFM1 {
       const body = [0, 0x59, 0x11, 0, 0, 0, ...t, ...new Array(28 - t.length).fill(0)];
       this.tx([0xF0, ...pack7(body), 0xF7]);
     } else if (eq(d, UPGRADE)) {
+      this.upgrades++;
       this.queue = this.identity.startsWith("ota-")
         ? [...Array.from({ length: 6 }, (_, k) => [k * 512, 512]), [0xF0000000, 8]]
         : [[0, 64], [0x40, 160], [0x1000, 512], [0xE0000000, 8]];
@@ -1678,7 +1689,11 @@ class FakeFM1 {
       this.served++;
       if (this.served >= this.unplugAfter) { this.input.state = this.output.state = "disconnected"; return; }
       if (addr === 0xE0000000) setTimeout(() => this.boot("ota-FM-1_900", "Felucca Update"), 300);
-      else if (addr === 0xF0000000) setTimeout(() => this.boot("FM-1_900", "Felucca"), 300);
+      else if (addr === 0xF0000000) setTimeout(() => {
+        this.disconnect();
+        this.onReboot?.(this);
+        if (this.returned) setTimeout(() => this.boot(this.returned, "Felucca"), 150);
+      }, 300);
       else this.next();
     }
   }
@@ -1706,14 +1721,56 @@ async function updater() {
   const dev2 = new FakeFM1(image, { unplugAfter: 3 });
   dev2.boot("ota-FM-1_900", "Felucca Update");
   const t0 = Date.now();
-  const done = await new Updater(dev2.access).resume(image);
-  ok(done === false && Date.now() - t0 < 6000, "fm1ota.js: unplugged during the write -> stops at once");
+  const unplugged = await new Updater(dev2.access).resume(image, null, "FM-1_900").catch((e) => e);
+  ok(unplugged.code === "lost" && Date.now() - t0 < 6000, "fm1ota.js: unplugged during the write -> stops at once");
 
   const dev3 = new FakeFM1(image, { unplugAfter: 2 });
   const e = await new Updater(dev3.access).install(image, "FM-1_900").then(() => null, (x) => x);
   ok(e && e.code === "lost", "fm1ota.js: unplugged in step 1 -> error code 'lost'");
   const e2 = await new Updater({ inputs: new Map(), outputs: new Map() }).install(image, "FM-1_900").then(() => null, (x) => x);
   ok(e2 && e2.code === "notfound", "fm1ota.js: no device -> error code 'notfound'");
+
+  async function checkResume(label, options = {}, product = "FM-1_900", expected, selected = false) {
+    const dev = new FakeFM1(image, options);
+    dev.boot("ota-FM-1_900", "Felucca Update");
+    const up = new Updater(dev.access);
+    const ota = selected ? await up.find((id) => id.model === "ota-FM-1") : undefined;
+    const steps = [];
+    const result = await up.resume(image, (step) => steps.push(step), product, ota).catch((e) => e);
+    ok(result === true ? expected === true : result?.code === expected, `fm1ota.js: resume: ${label}`);
+    ok(steps.filter((step) => step === "done").length === (expected === true ? 1 : 0)
+      && dev.bad === 0, `fm1ota.js: completion and transfer integrity: ${label}`);
+    return { dev, steps };
+  }
+
+  await Promise.all([
+    checkResume("selected loader, changed MIDI IDs and name", {}, "FM-1_900", true, true),
+    checkResume("USB Rescue", { returned: "FM-1_000" }, "FM-1_900", "mismatch"),
+    checkResume("no return", { returned: null }, "FM-1_900", "noreturn"),
+    checkResume("failed finish acknowledgment", { failFinish: true }, "FM-1_900", "lost")
+      .then(({steps}) => ok(!steps.includes("reboot"), "fm1ota.js: failed acknowledgment does not start verification")),
+    checkResume("expected product omitted", {}, null, "model")
+      .then(({dev}) => ok(dev.upgrades === 0, "fm1ota.js: product-less resume sends no upgrade")),
+    checkResume("competitor appears before USB Rescue", {
+      returned: "FM-1_000",
+      onReboot(a) {
+        new FakeFM1(image, { access: a.access, identity: "FM-1_900", name: "FM-1 B" });
+      },
+    }, "FM-1_900", "ambiguous", true),
+    ...["FM-1_015", "FM-1_016"].map((product) =>
+      checkResume(`stock recovery verifies ${product}`, { returned: product }, product, true, true)),
+    checkResume("stock recovery rejects the other official product",
+      { returned: "FM-1_015" }, "FM-1_016", "mismatch", true),
+  ]);
+
+  const first = new FakeFM1(image, { identity: "ota-FM-1_900" });
+  const up = new Updater(first.access);
+  const selected = await up.find((id) => id.model === "ota-FM-1");
+  first.disconnect();
+  const substitute = new FakeFM1(image, { access: first.access, identity: "ota-FM-1_900" });
+  const swapped = await up.resume(image, null, "FM-1_900", selected).catch((e) => e);
+  ok(swapped.code === "ambiguous" && first.upgrades + substitute.upgrades === 0,
+    "fm1ota.js: a loader that disappears after selection cannot be replaced before writing");
 }
 
 await editorMock();

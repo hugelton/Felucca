@@ -12,9 +12,11 @@ const UPGRADE = [0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7];
 const MAXDATA = 512;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const IS_OTA = (id) => /^ota-/i.test(id.model);
+const FM1_PORT = /fm-1|felucca|ota|composite|sinco|usb[- ]midi/i;
+const REBOOT_SETTLE_MS = 3000;
 
 // errors carry a code the pages translate: notfound, model, stopped, noloader, lost, noreturn,
-// mismatch (detail: the identity the device reports), badreq
+// mismatch (detail: the identity the device reports), ambiguous, badreq
 function fail(code, msg, detail = "") { const e = new Error(msg); e.code = code; e.detail = detail; return e; }
 
 export function pack7(data) {
@@ -67,8 +69,8 @@ function parseIdentity(pkt) {
 
 // one MIDI in/out pair with a SysEx queue
 class Link {
-  constructor(input, output) {
-    this.input = input; this.output = output; this.q = []; this.waiter = null;
+  constructor(input, output, opened) {
+    this.input = input; this.output = output; this.opened = opened; this.q = []; this.waiter = null;
     input.onmidimessage = (ev) => {
       if (ev.data[0] !== 0xF0) return;
       this.q.push(Array.from(ev.data));
@@ -91,6 +93,26 @@ class Link {
     return this.q.shift() || null;
   }
   close() { this.input.onmidimessage = null; }
+  async release() {
+    this.close();
+    await Promise.allSettled(this.opened.map(async (port) => port.close()));
+  }
+}
+
+async function openLink(input, output) {
+  const opened = [];
+  try {
+    for (const port of [input, output]) {
+      if (port.connection !== "open") {
+        opened.push(port);
+        await port.open();
+      }
+    }
+    return new Link(input, output, opened);
+  } catch (_) {
+    await Promise.allSettled(opened.map(async (port) => port.close()));
+    return null;
+  }
 }
 
 async function handshake(link, tries = 3) {
@@ -108,6 +130,51 @@ async function handshake(link, tries = 3) {
   return null;
 }
 
+function candidatePorts(ports) {
+  return [...ports.values()].filter((port) => port.state !== "disconnected" && FM1_PORT.test(port.name || ""));
+}
+
+const samePair = (a, b) => a?.input === b?.input && a?.output === b?.output;
+
+// Web MIDI does not expose a USB serial shared by the app and loader. Track
+// one pair before writing and at most one replacement through re-enumeration.
+class ResumeTarget {
+  constructor(access, loader) {
+    this.access = access;
+    this.loader = loader;
+    this.onChange = () => {
+      try { this.inspect(); } catch (error) { this.error = error; }
+    };
+    access.addEventListener("statechange", this.onChange);
+  }
+
+  inspect() {
+    if (this.error) throw this.error;
+    const [inputs, outputs] = [this.access.inputs, this.access.outputs].map(candidatePorts);
+    const [input] = inputs, [output] = outputs;
+    const ambiguous = () => fail("ambiguous", "Connect only the FM-1 you want to update.");
+    if (inputs.length > 1 || outputs.length > 1) throw ambiguous();
+    if (!input || !output) return null;
+    if (input.name !== output.name) throw ambiguous();
+    const pair = { input, output };
+    if (samePair(pair, this.loader)) {
+      if (this.returning) throw ambiguous();
+      return pair;
+    }
+    if (!this.rebootAt || input === this.loader.input || output === this.loader.output) throw ambiguous();
+    if (this.returning && !samePair(pair, this.returning)) throw ambiguous();
+    if (!this.returning) {
+      this.returning = pair;
+      this.rebootAt = Date.now() + REBOOT_SETTLE_MS;
+    }
+    return pair;
+  }
+
+  active() { return samePair(this.inspect(), this.loader) && !this.loader.lost; }
+  restarting() { this.rebootAt = Date.now() + REBOOT_SETTLE_MS; }
+  close() { this.access.removeEventListener("statechange", this.onChange); }
+}
+
 export class Updater {
   constructor(access, log) {
     this.access = access;
@@ -119,36 +186,58 @@ export class Updater {
     const outs = [...this.access.outputs.values()];
     for (const input of this.access.inputs.values()) {
       if (input.state === "disconnected") continue;
-      if (!/fm-1|felucca|ota|composite|sinco|usb-midi/i.test(input.name || "")) continue;   // never probe other gear
+      if (!FM1_PORT.test(input.name || "")) continue;   // never probe other gear
       const output = outs.find((o) => o.name === input.name && o.state !== "disconnected");
       if (!output) continue;
-      try { await input.open(); await output.open(); } catch (_) { continue; }
-      const link = new Link(input, output);
-      const id = await handshake(link, 2);
-      if (id && (!filter || filter(id))) return { link, id, name: input.name };
-      link.close();
+      const dev = await this.probe({ input, output }, filter);
+      if (dev) return dev;
     }
     return null;
   }
 
-  async waitFor(filter, ms) {
+  async probe({ input, output }, filter) {
+    const link = await openLink(input, output);
+    if (!link) return null;
+    let keep = false;
+    try {
+      const id = await handshake(link, 2);
+      if (!id || link.lost || (filter && !filter(id))) return null;
+      keep = true;
+      return { link, id, name: input.name };
+    } finally {
+      if (!keep) await link.release();
+    }
+  }
+
+  async waitFor(filter, ms, target) {
     const end = Date.now() + ms;
     while (Date.now() < end) {
-      const dev = await this.find(filter);
-      if (dev) return dev;
-      await sleep(1000);
+      if (!target) {
+        const dev = await this.find(filter);
+        if (dev) return dev;
+      } else {
+        const pair = target.inspect();
+        if (pair && Date.now() >= target.rebootAt) {
+          const dev = await this.probe(pair, filter);
+          if (dev) {
+            await dev.link.release();
+            if (samePair(pair, target.inspect())) return dev;
+          }
+        }
+      }
+      await sleep(target ? 250 : 1000);
     }
     return null;
   }
 
   // serve read requests until the device asks for one of the finish addresses; stops early
   // when the port disappears (lost: true) instead of waiting out idleMs
-  async serve(link, image, finishAddr, idleMs, onProgress) {
+  async serve(link, image, finishAddr, idleMs, onProgress, active = () => !link.lost) {
     let served = 0, last = Date.now();
     for (;;) {
       const pkt = await link.read(1000);
+      if (!active()) return { served, finished: false, lost: true };
       if (!pkt) {
-        if (link.lost) return { served, finished: false, lost: true };
         if (Date.now() - last > idleMs) return { served, finished: false };
         continue;
       }
@@ -156,13 +245,15 @@ export class Updater {
       if (!r) continue;
       last = Date.now();
       if (r.addr === 0xE0000000 || r.addr === 0xF0000000) {
-        link.send(response(r.addr, [...new TextEncoder().encode("success"), 0]));
+        if (!link.send(response(r.addr, [...new TextEncoder().encode("success"), 0]))) {
+          return { served, finished: false, lost: true };
+        }
         if (r.addr === finishAddr) return { served, finished: true };
         continue;
       }
       if (r.len > MAXDATA || r.addr + r.len > image.length) throw fail("badreq", `bad request ${r.addr.toString(16)}+${r.len}`);
       await sleep(10);
-      if (!link.send(response(r.addr, Array.from(image.subarray(r.addr, r.addr + r.len)), r.fl))) {
+      if (!active() || !link.send(response(r.addr, Array.from(image.subarray(r.addr, r.addr + r.len)), r.fl))) {
         return { served, finished: false, lost: true };
       }
       served++;
@@ -200,31 +291,43 @@ export class Updater {
   }
 
   // step 2 with the loader found by find()/waitFor()
-  async write(ota, image, step) {
-    ota.link.send(UPGRADE);
-    await sleep(2000);
-    const s2 = await this.serve(ota.link, image, 0xF0000000, 180000, (n) => step("write", n));
-    ota.link.close();
-    return s2;
+  async write(ota, image, step, active = () => !ota.link.lost) {
+    try {
+      if (!active() || !ota.link.send(UPGRADE)) return { served: 0, finished: false, lost: true };
+      await sleep(2000);
+      return await this.serve(ota.link, image, 0xF0000000, 180000, (n) => step("write", n), active);
+    } finally {
+      ota.link.close();
+    }
   }
 
-  // resume: the device is already in update mode (loader) -> true when the write finished
-  async resume(image, onStep, product = null) {
-    const model = product && product.split("_")[0];
-    const ota = await this.find((id) => model ? id.model === "ota-" + model : IS_OTA(id));
-    if (!ota) return false;
-    const step = onStep || (() => {});
-    const result = await this.write(ota, image, step);
-    if (!result.finished) return false;
-    if (product) {
+  // Resume on the selected loader, then verify the app on the returning unit.
+  async resume(image, onStep, product, selected) {
+    const model = /^([^_]+)_\d+$/.exec(product)?.[1];
+    const loader = (id) => id.model === "ota-" + model;
+    let ota = selected, target;
+    try {
+      if (!model) throw fail("model", "An expected FM-1 product is required to resume.");
+      ota ??= await this.find(loader);
+      if (!ota) return false;
+      if (!loader(ota.id)) throw fail("model", "The loader does not match the expected FM-1 model.");
+
+      target = new ResumeTarget(this.access, ota.link);
+      const step = onStep || (() => {});
+      const result = await this.write(ota, image, step, () => target.active());
+      if (result.lost) throw fail("lost", "The connection to the loader was lost during the write.");
+      if (!result.finished) return false;
+
+      target.restarting();
       step("reboot");
-      await sleep(3000);
-      const back = await this.waitFor((id) => id.model === model, 40000);
+      const back = await this.waitFor((id) => id.model === model, REBOOT_SETTLE_MS + 40000, target);
       if (!back) throw fail("noreturn", "The FM-1 did not return after resuming the write.");
-      back.link.close();
       if (back.id.text !== product) throw fail("mismatch", "The FM-1 reports a different firmware after resuming.", back.id.text);
       step("done", back.id.text);
+      return true;
+    } finally {
+      target?.close();
+      await ota?.link.release();
     }
-    return true;
   }
 }
