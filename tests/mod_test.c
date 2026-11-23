@@ -489,11 +489,15 @@ static void test_cost(void)
         printf("mod: cost: no instruction counter on this host (proc_pid_rusage), skipped\n");
         return;
     }
-    c_idle = cost(idle, 0);
-    c0 = cost(phys, 0);
-    c1 = cost(phys, 1);
-    m0 = cost(mix, 0);
-    m1 = cost(mix, 1);
+    c_idle = c0 = c1 = m0 = m1 = 1e30;
+    for (int r = 0; r < 3; r++) {                 /* the least of three: the host's counter jitters by a percent */
+        double a = cost(idle, 0), b = cost(phys, 0), c = cost(phys, 1), d = cost(mix, 0), e = cost(mix, 1);
+        if (a < c_idle) c_idle = a;
+        if (b < c0) c0 = b;
+        if (c < c1) c1 = c;
+        if (d < m0) m0 = d;
+        if (e < m1) m1 = e;
+    }
     printf("mod: cost: PHYS %s (plays 4 voices): %.0f -> %.0f instructions / sample with 4 slots (+%.0f, +%.1f %% of "
            "the part over the idle mix %.0f)\n", ENGINES[e_phys]->presets[pp].name, c0, c1, c1 - c0,
            (c1 - c0) * 100 / (c0 - c_idle), c_idle);
