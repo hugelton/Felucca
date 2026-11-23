@@ -1640,22 +1640,35 @@ const UPGRADE = [0xF0, 0x22, 0x24, 0x35, 0x7F, 0xF7];
 
 /* an FM-1 on WebMIDI: identity, then "device asks, host answers" reads of the image */
 class FakeFM1 {
-  constructor(image, { unplugAfter = Infinity } = {}) {
+  constructor(image, { unplugAfter = Infinity, finalIdentity = "FM-1_900", name = "FM-1", identity = "FM-1_015", loaderName = "Felucca Update", access = { inputs: new Map(), outputs: new Map() } } = {}) {
     this.image = image; this.unplugAfter = unplugAfter; this.served = 0; this.bad = 0;
-    this.access = { inputs: new Map(), outputs: new Map() };
-    this.boot("FM-1_015", "FM-1");
+    this.finalIdentity = finalIdentity; this.loaderName = loaderName;
+    this.access = access; this.sent = [];
+    this.boot(identity, name);
   }
   boot(identity, name) {
     this.identity = identity; this.waiting = null; this.queue = [];
-    for (const m of [this.access.inputs, this.access.outputs]) { for (const p of m.values()) p.state = "disconnected"; m.clear(); }
+    this.disconnect();
     const id = Math.random().toString(36).slice(2);
     this.input = { id: "i" + id, name, state: "connected", onmidimessage: null, open: async () => {} };
     this.output = { id: "o" + id, name, state: "connected", open: async () => {}, send: (d) => {
       if (this.output.state !== "connected") throw new Error("InvalidStateError");
-      setTimeout(() => this.rx(Array.from(d)), 1);
+      const packet = Array.from(d);
+      this.sent.push(packet);
+      setTimeout(() => this.rx(packet), 1);
     } };
     this.access.inputs.set(this.input.id, this.input);
     this.access.outputs.set(this.output.id, this.output);
+  }
+  disconnect() {
+    if (!this.input) return;
+    this.input.state = this.output.state = "disconnected";
+    this.access.inputs.delete(this.input.id);
+    this.access.outputs.delete(this.output.id);
+  }
+  finish(addr) {
+    if (addr === 0xE0000000) setTimeout(() => this.boot("ota-FM-1_900", this.loaderName), 300);
+    else setTimeout(() => this.boot(this.finalIdentity, "Felucca"), 300);
   }
   tx(bytes) { const i = this.input; setTimeout(() => { if (i.state === "connected" && i.onmidimessage) i.onmidimessage({ data: Uint8Array.from(bytes) }); }, 1); }
   rx(d) {
@@ -1677,8 +1690,7 @@ class FakeFM1 {
       this.waiting = null;
       this.served++;
       if (this.served >= this.unplugAfter) { this.input.state = this.output.state = "disconnected"; return; }
-      if (addr === 0xE0000000) setTimeout(() => this.boot("ota-FM-1_900", "Felucca Update"), 300);
-      else if (addr === 0xF0000000) setTimeout(() => this.boot("FM-1_900", "Felucca"), 300);
+      if (addr === 0xE0000000 || addr === 0xF0000000) this.finish(addr);
       else this.next();
     }
   }
@@ -1716,6 +1728,146 @@ async function updater() {
   ok(e2 && e2.code === "notfound", "fm1ota.js: no device -> error code 'notfound'");
 }
 
+async function updaterTargeting() {
+  const image = Uint8Array.from({ length: 0x2000 }, (_, i) => (i * 7) & 0xFF);
+  const quiet = (dev) => dev.sent.every((packet) => eq(packet, HS));
+  const upgrades = (dev) => dev.sent.filter((packet) => eq(packet, UPGRADE)).length;
+  const install = async (dev) => {
+    const steps = [];
+    const error = await new Updater(dev.access).install(image, "FM-1_900", (k) => steps.push(k)).then(() => null, (e) => e);
+    return { error, steps };
+  };
+  const ambiguous = ({ error, steps }) => error?.code === "ambiguous" && !steps.includes("done");
+
+  for (const [name, identity] of [["FM-1_B", "FM-1_015"], ["FM-1_B", "ota-FM-1_900"],
+    ["FM-1_A", "FM-1_015"], ["USB MIDI Device", "ota-FM-1_900"]]) {
+    const a = new FakeFM1(image, { name: "FM-1_A" });
+    const b = new FakeFM1(image, { name, identity, access: a.access });
+    ok(ambiguous(await install(a)) && quiet(a) && quiet(b) && !a.input.onmidimessage && !b.input.onmidimessage,
+      `web selection refuses a competing ${name} (${identity})`);
+  }
+  {
+    const a = new FakeFM1(image, { name: "FM-1_A" });
+    a.output.name = "FM-1_B";
+    ok(ambiguous(await install(a)) && quiet(a), "web selection refuses mismatched input/output");
+  }
+  for (const identity of ["ota-FM-1_015", "ota-FM-1_900"]) {
+    const a = new FakeFM1(image, { name: "FM-1_A" });
+    let b;
+    const finish = a.finish.bind(a);
+    a.finish = (addr) => {
+      if (addr === 0xE0000000) b = new FakeFM1(image, { name: "FM-1_B", identity, access: a.access });
+      finish(addr);
+    };
+    ok(ambiguous(await install(a)) && upgrades(a) === 1 && quiet(b),
+      `web refuses the competing loader (${identity}) during handoff`);
+  }
+  {
+    const a = new FakeFM1(image, { name: "FM-1_A" });
+    let b;
+    const finish = a.finish.bind(a);
+    a.finish = (addr) => {
+      if (addr !== 0xE0000000) { finish(addr); return; }
+      a.disconnect();
+      b = new FakeFM1(image, { name: "FM-1_B", identity: "ota-FM-1_900", access: a.access });
+      setTimeout(() => { b.disconnect(); a.boot("ota-FM-1_900", a.loaderName); }, 300);
+    };
+    ok(ambiguous(await install(a)) && upgrades(a) === 1 && quiet(b),
+      "web rejects two successive replacement pairs observed during USB settle");
+  }
+  {
+    const a = new FakeFM1(image, { name: "FM-1_A" });
+    const finish = a.finish.bind(a);
+    a.finish = (addr) => {
+      if (addr === 0xE0000000) a.boot("ota-FM-1_015", "FM-1 Update");
+      else finish(addr);
+    };
+    const { error, steps } = await install(a);
+    ok(error?.code === "foreign" && upgrades(a) === 1 && !steps.includes("done"),
+      "web checks loader compatibility after the running install");
+  }
+  {
+    const a = new FakeFM1(image, { name: "FM-1_A" });
+    let b;
+    const finish = a.finish.bind(a);
+    a.finish = (addr) => {
+      if (addr === 0xF0000000) b = new FakeFM1(image, { name: "FM-1_B", identity: "FM-1_900", access: a.access });
+      else finish(addr);
+    };
+    ok(ambiguous(await install(a)) && upgrades(a) === 2 && quiet(b),
+      "web rejects a different running FM-1 reporting the expected identity after write");
+  }
+  {
+    const a = new FakeFM1(image, { loaderName: "USB MIDI Device" });
+    const keys = new FakeFM1(image, { name: "Arturia KeyStep Pro", access: a.access });
+    const { error, steps } = await install(a);
+    ok(!error && steps.at(-1) === "done" && upgrades(a) === 2 && a.served === 11 && keys.sent.length === 0,
+      "web follows changing IDs and the generic loader with unrelated gear present");
+  }
+
+  {
+    const a = new FakeFM1(image);
+    a.finish = (addr) => { a.identity = addr === 0xE0000000 ? "ota-FM-1_900" : "FM-1_900"; };
+    const { error, steps } = await install(a);
+    ok(!error && steps.at(-1) === "done" && upgrades(a) === 2 && a.served === 11,
+      "web follows a mode change on the same input/output pair");
+  }
+
+  const page = readFileSync(join(HERE, "index_pkg.html"), "utf8");
+  const cases = [
+    {button: "go", identity: "ota-FM-1_900", product: "FM-1_900", done: true, probes: 1},
+    {button: "go", identity: "ota-FM-1_015", product: "FM-1_900", error: "foreign"},
+    {button: "stock-go", identity: "ota-FM-1_015", product: "FM-1_015", done: true},
+    {button: "stock-go", identity: "ota-FM-1_016", product: "FM-1_016", done: true},
+    {button: "stock-go", identity: "FM-1_900", product: "FM-1_016", done: true, backup: true},
+    {button: "stock-go", identity: "FM-1_900", product: "FM-1_016", backup: true, swap: true, error: "ambiguous"},
+  ];
+  for (const test of cases) {
+    const { button, identity, product } = test;
+    const a = new FakeFM1(image, { identity, finalIdentity: product });
+    let b;
+    let click;
+    let saved = 0, backupPair;
+    const steps = [];
+    const start = page.indexOf(`$("${button}").addEventListener("click"`);
+    const end = button === "go" ? page.indexOf('$("stock-file").addEventListener', start) : page.indexOf("</script>", start);
+    vm.runInNewContext(page.slice(start, end), {
+      $: () => ({ checked: true, addEventListener: (_name, fn) => { click = fn; } }),
+      Updater, image, meta: { product, version: "1.8.3" }, stock: { image, product },
+      writing: false, pkgBytes: image, flashSize: 0, pinned: async () => true, newer: () => true,
+      navigator: { requestMIDIAccess: async () => a.access },
+      TEXT: { en: { ambiguous: true, foreign: true, lost: true } }, lang: "en",
+      log() {}, lockInstaller() {}, sayK: (k) => steps.push(k),
+      t: (k) => k, confirm: () => true,
+      BackupConnection: class {
+        constructor(input, output) { backupPair = [input, output]; }
+        async request() { return []; }
+        close() {}
+      },
+      archiveInfo: () => ({ supported: true, version: "FELUCCA 1.8.3" }),
+      captureBackup: async () => {
+        if (test.swap) {
+          a.disconnect();
+          b = new FakeFM1(image, { name: "FM-1_B", identity, finalIdentity: product, access: a.access });
+        }
+        return {};
+      },
+      saveArchive: () => { saved++; },
+    });
+    const selectedInput = a.input, selectedOutput = a.output;
+    await click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (test.done)
+      ok(steps.at(-1) === "done" && a.bad === 0 && upgrades(a) === (test.backup ? 2 : 1) &&
+        (!test.probes || a.sent.filter((pkt) => eq(pkt, HS)).length === test.probes + 1) &&
+        (!test.backup || (saved === 1 && backupPair[0] === selectedInput && backupPair[1] === selectedOutput)),
+        `${button} verifies ${product} from the selected ${identity}`);
+    else
+      ok(steps.at(-1) === test.error && quiet(a) && (!b || quiet(b)),
+        `${button} refuses ${test.swap ? "a swap during backup" : identity} before an upgrade`);
+  }
+}
+
 await editorMock();
 await editorSamplePresets();
 mockTables();
@@ -1739,5 +1891,6 @@ editorIcons();
 samplesMatch();
 await packages();
 await updater();
+await updaterTargeting();
 console.log(failed ? `WEB TESTS FAILED (${failed})` : "web tests passed");
 process.exit(failed ? 1 : 0);
