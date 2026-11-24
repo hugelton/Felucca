@@ -1,0 +1,19 @@
+# The big buffers that the audio reads seldom (the delay line, the slicer's) and the storage scratch: in PSRAM, the
+# rest of Felucca's RAM stays inside (the S3's DRAM cannot hold all of the FM-1's 390 KB next to the IDF).
+[scheme:felucca_psram]
+entries:
+    bss -> extern_ram
+
+[mapping:felucca]
+archive: libmain.a
+entries:
+    felucca_m5:dly_buf (felucca_psram)
+    felucca_m5:sl_buf (felucca_psram)
+    felucca_m5:up_bank (felucca_psram)
+    felucca_m5:proj_scratch (felucca_psram)
+    felucca_m5:proj_wire_u (felucca_psram)
+    felucca_m5:upf (felucca_psram)
+    felucca_m5:st_buf (felucca_psram)
+    felucca_m5:proj_slot (felucca_psram)
+    felucca_m5:chain (felucca_psram)
+    felucca_m5:midi_sel_on (felucca_psram)

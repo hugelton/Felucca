@@ -2,6 +2,18 @@
 
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
+> **This is a research branch.** It has Felucca 1.8.3 on platforms other than the FM-1: a desktop with SDL2, a
+> libretro core, PortMaster, and the M5Stack CoreS3 ([platforms/](platforms/README.md)).
+>
+> I made these ports earlier and took them down, because I want to focus on [Fune](https://github.com/hugelton/Fune)
+> and can't maintain them. Someone asked to port Felucca to SDL2, so I'm publishing them again here.
+>
+> Tested on the M5Stack CoreS3 and in RetroArch (NX Lite). There is no guarantee that any of it works, and no support,
+> releases or fixes. If you want to use them, please fork this repository and carry them on yourself.
+>
+> The FM-1 firmware is on the [main branch](https://github.com/hugelton/Felucca/tree/main) and in the
+> [releases](https://github.com/hugelton/Felucca/releases).
+
 Felucca is open-source custom synthesizer firmware for the **M-VAVE FM-1**.
 
 The FM-1 is the only supported hardware target. This project does not provide, maintain, or accept requests for ports to other devices or software platforms.
