@@ -2,6 +2,8 @@
 
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
+> Felucca is not actively maintained. I'm now developing [Fune](https://github.com/hugelton/Fune).
+
 Felucca is open-source custom synthesizer firmware for the **M-VAVE FM-1**.
 
 The FM-1 is the only supported hardware target. This project does not provide, maintain, or accept requests for ports to other devices or software platforms.
@@ -26,6 +28,8 @@ The firmware uses [Felucca-Engines](https://github.com/hugelton/Felucca-Engines)
 ## Development and support
 
 Felucca focuses on the FM-1. Third-party modifications and ports are independent projects and are not tested or supported here. Contributions are considered at the maintainer's discretion; no development schedule or ongoing support is promised.
+
+Earlier ports to other platforms (a desktop with SDL2, a libretro core, PortMaster, the M5Stack CoreS3) are kept for research on the [research/platforms](https://github.com/hugelton/Felucca/tree/research/platforms) branch. They come with no guarantee or support; fork the repository to use them.
 
 Felucca is developed with the assistance of AI coding agents (code, tests, documentation, translation, maintenance). Design, features, sounds and direction are the maintainer's or the community's; no generative AI is used for music, icons or artwork. See [On AI-Assisted Development and Responsibility](https://github.com/hugelton/Felucca/discussions/166).
 
